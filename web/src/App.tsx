@@ -16,6 +16,14 @@ export type OverviewStatus = {
   [k: string]: unknown
 }
 
+/** 窄屏断点：≤760px 时导航是浮层抽屉，>760px 时是常驻侧栏列。 */
+const DRAWER_BREAKPOINT = 760
+
+/** 当前是否处于抽屉模式（窄屏）。与 CSS 里 `@media (max-width: 760px)` 必须一致。 */
+function isDrawerMode(): boolean {
+  return typeof window !== 'undefined' && window.innerWidth <= DRAWER_BREAKPOINT
+}
+
 /** 应用外壳：登录闸门 + 导航 + 顶栏 + 当前视图。 */
 export default function App() {
   const { session, refresh, login, logout } = useSession()
@@ -26,9 +34,7 @@ export default function App() {
   //  - 移动端：默认隐藏，点按钮 = 弹出/关闭抽屉
   // 之前这个 state 只有移动端语义、初值 false，导致宽屏一进页面侧栏就是收起状态，
   // 点一下才"展开"——和用户预期（默认展开、点了收起）正好相反。
-  const [navOpen, setNavOpen] = useState(
-    () => typeof window === 'undefined' || window.innerWidth > 760,
-  )
+  const [navOpen, setNavOpen] = useState(() => !isDrawerMode())
   const [toasts, setToasts] = useState<ToastItem[]>([])
   const [status, setStatus] = useState<OverviewStatus | null>(null)
   const [refreshNonce, setRefreshNonce] = useState(0)
@@ -78,16 +84,25 @@ export default function App() {
   const go = useCallback((id: ViewId) => {
     if (parseHash(location.hash) !== id) location.hash = id
     setView(id)
-    // 只有移动端导航后要收起抽屉；桌面端点菜单不该把侧栏也收起来——
-    // 那样每切换一次视图都要重新点开，非常烦人。
-    if (window.innerWidth <= 760) setNavOpen(false)
+    // 只有抽屉模式（窄屏）才关边栏：那里导航是浮层，不关会挡住刚切到的内容。
+    // 桌面端展开状态下切视图必须保持展开——否则每换一页都要重新点开。
+    if (isDrawerMode()) setNavOpen(false)
   }, [])
 
-  // 跨断点缩放时重置可见性：从窄屏拉到宽屏，抽屉状态要变成"侧栏可见"，
-  // 否则会卡在收起的空壳上（宽屏没有抽屉，只有侧栏列）。
+  // 只在**真正跨过断点**时重置可见性，而不是每次 resize 都重置。
+  //
+  // 原先写成无条件的 setNavOpen(window.innerWidth > 760)，后果是任何一次 resize
+  // ——拖动窗口边框、开关开发者工具、甚至浏览器因地址栏出现而重排——都会把用户
+  // 手动收起 / 展开的选择覆盖掉，看起来就像"边栏自己乱跳"。
+  // 记录上一次的模式，只有模式翻转时才动状态。
   useEffect(() => {
+    let wasDrawer = isDrawerMode()
     const onResize = () => {
-      setNavOpen(window.innerWidth > 760)
+      const nowDrawer = isDrawerMode()
+      if (nowDrawer === wasDrawer) return // 同一模式内的大小变化：保留用户选择
+      wasDrawer = nowDrawer
+      // 跨到桌面端 → 侧栏恢复常驻展开；跨到窄屏 → 抽屉默认收起。
+      setNavOpen(!nowDrawer)
     }
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
