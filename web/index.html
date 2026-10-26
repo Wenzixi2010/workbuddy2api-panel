@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>WorkBuddy2API · 控制台</title>
-<link rel="icon" type="image/svg+xml" href="/panel/favicon.svg">
+<!-- v=2 的作用：旧图标曾被 max-age=86400 缓存住，URL 不变的话浏览器不会
+     回来问，用户看不到新图标。换一个 URL 等于强制换一条缓存记录；
+     之后靠服务端的 ETag + no-cache 做条件请求，不再需要改这个数字。 -->
+<link rel="icon" type="image/svg+xml" href="/panel/favicon.svg?v=2">
 <!-- 首屏主题预热：必须留在样式表之前、且是同步脚本。
      html 上的 data-theme="dark" 只是无脚本兜底；真实偏好在 localStorage。
      把这个判定放在样式表之前，第一帧就是最终主题，不会「先闪深色再变浅色」。

@@ -111,3 +111,47 @@ func TestDistNeverEmpty(t *testing.T) {
 		t.Fatalf("web/public/.gitkeep-dist 缺失：构建后 dist 可能变空（%v）", err)
 	}
 }
+
+// TestFaviconCacheRevalidate favicon 这类固定名字的产物必须可再验证。
+//
+// 回归点：它曾被设成 `public, max-age=86400`。文件名不带内容 hash，一升级
+// 图标内容就变而 URL 不变，浏览器（和更顽固的 favicon 独立缓存）会继续显示
+// 旧图标，用户按 Ctrl+F5 都救不回来——只能清浏览器缓存。
+// 正确做法是 no-cache + ETag：每次条件请求，没变就 304，变了立刻生效。
+func TestFaviconCacheRevalidate(t *testing.T) {
+	p := newTestPanel()
+
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, httptest.NewRequest("GET", "/panel/favicon.svg", nil))
+	if rec.Code != http.StatusOK {
+		t.Skipf("dist 里没有 favicon.svg（纯后端构建），跳过；code=%d", rec.Code)
+	}
+	if cc := rec.Header().Get("Cache-Control"); strings.Contains(cc, "max-age") {
+		t.Errorf("Cache-Control=%q 不应带 max-age：固定文件名加长缓存会让换图标不生效", cc)
+	}
+	etag := rec.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("缺少 ETag，浏览器无法做条件请求，只能每次全量重下")
+	}
+
+	// 带上 If-None-Match 应当拿到 304，且没有 body。
+	req := httptest.NewRequest("GET", "/panel/favicon.svg", nil)
+	req.Header.Set("If-None-Match", etag)
+	rec2 := httptest.NewRecorder()
+	p.ServeHTTP(rec2, req)
+	if rec2.Code != http.StatusNotModified {
+		t.Errorf("条件请求返回 %d，期望 304", rec2.Code)
+	}
+	if rec2.Body.Len() != 0 {
+		t.Errorf("304 不应带 body，实际 %d 字节", rec2.Body.Len())
+	}
+
+	// 不匹配的 ETag 必须返回完整内容，否则改了内容用户也拿不到新的。
+	req2 := httptest.NewRequest("GET", "/panel/favicon.svg", nil)
+	req2.Header.Set("If-None-Match", `"stale"`)
+	rec3 := httptest.NewRecorder()
+	p.ServeHTTP(rec3, req2)
+	if rec3.Code != http.StatusOK || rec3.Body.Len() == 0 {
+		t.Errorf("ETag 不匹配时应返回 200 + 完整内容，实际 %d / %d 字节", rec3.Code, rec3.Body.Len())
+	}
+}

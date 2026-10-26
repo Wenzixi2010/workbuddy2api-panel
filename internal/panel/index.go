@@ -154,7 +154,20 @@ func (p *Panel) distFile(name string) http.HandlerFunc {
 			return
 		}
 		setSecurityHeaders(w)
-		w.Header().Set("Cache-Control", "public, max-age=86400")
+		// 这里**不能**给 max-age 强缓存。这些文件（favicon.svg）的名字是固定的、
+		// 不带内容 hash，一升级内容就换而 URL 不变。给它一天 max-age 的后果是：
+		// 换了图标之后，浏览器（以及更顽固的 favicon 独立缓存）会继续显示旧图标，
+		// 用户按 Ctrl+F5 也好不了——只能去清浏览器缓存。
+		//
+		// no-cache 不是"不缓存"：它要求每次都带 ETag 回来验证一遍，没变就是 304，
+		// 代价只有一次条件请求；变了立刻拿到新的。
+		etag := `"` + etagOf(data) + `"`
+		w.Header().Set("ETag", etag)
+		w.Header().Set("Cache-Control", "no-cache")
+		if match := r.Header.Get("If-None-Match"); match != "" && strings.Contains(match, etag) {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 		if ct := contentTypeOf(name); ct != "" {
 			w.Header().Set("Content-Type", ct)
 		} else {
@@ -163,6 +176,15 @@ func (p *Panel) distFile(name string) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(data)
 	}
+}
+
+// etagOf 用内容摘要拼 ETag。
+//
+// 用 sha256 截断而不是 len/crc：图标这类小文件内容差几个字节长度往往相同，
+// 用长度当校验和会让"改了但没变长"的情况永远拿不到新内容。
+func etagOf(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:8])
 }
 
 // contentTypeOf 按扩展名给出 Content-Type。
