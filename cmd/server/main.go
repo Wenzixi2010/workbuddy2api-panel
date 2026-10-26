@@ -25,6 +25,7 @@ import (
 	"github.com/misakano7545/workbuddy2api-panel/internal/auth"
 	"github.com/misakano7545/workbuddy2api-panel/internal/balance"
 	"github.com/misakano7545/workbuddy2api-panel/internal/credithist"
+	"github.com/misakano7545/workbuddy2api-panel/internal/gatewaykey"
 	"github.com/misakano7545/workbuddy2api-panel/internal/livecfg"
 	"github.com/misakano7545/workbuddy2api-panel/internal/panel"
 	"github.com/misakano7545/workbuddy2api-panel/internal/pool"
@@ -356,6 +357,13 @@ func main() {
 		ModelAliases:         livecfg.NormalizeModelAliases(cfg.Models.Aliases),
 		// 模型降级路由表（pool.model_fallback）：6004 限流时同账号改用等价模型。
 		ModelFallback: cfg.Pool.ModelFallback,
+		// 客户 API Key 开关（config client_keys.enabled）：热生效，面板保存后
+		// 下一个请求即按新值决定「客户 Key 是否还能用」。
+		ClientKeysEnabled: cfg.clientKeysOn(),
+		// 面板登录账号（config panel_auth）：与网关 api_key 完全独立，热生效。
+		PanelUser:         cfg.PanelAuth.Username,
+		PanelPass:         cfg.PanelAuth.Password,
+		PanelSessionHours: cfg.PanelAuth.SessionHours,
 	})
 	// 用量记录器：与 state 文件同目录，随 state_file 配置一起搬移。
 	// datapath 由 state 文件路径推出，避免再加一个配置项。
@@ -397,6 +405,23 @@ func main() {
 		AutoEnabled: cfg.Update.AutoEnabled,
 		AutoTime:    cfg.Update.AutoTime,
 	})
+	// 客户 API Key 存储：与 state/usage 同目录（或 config client_keys.file 指定路径）。
+	// 载入失败不致命（Fatal 会把整个网关带走，而客户 Key 只是鉴权的一种方式）——
+	// 打 ERROR 并降级为「本轮只有主密钥」，比让所有人打不进来更接近可用。
+	clientKeyPath := strings.TrimSpace(cfg.ClientKeys.File)
+	if clientKeyPath == "" {
+		clientKeyPath = stateSibling(cfg.StateFile, "gateway_keys.json")
+	}
+	clientKeys, ckErr := gatewaykey.Open(clientKeyPath)
+	if ckErr != nil {
+		log.Printf("ERROR: 客户 API Key 存储载入失败: %v —— 本次运行不启用客户 Key（只有主密钥可用），修好 %s 后重启", ckErr, clientKeyPath)
+		clientKeys = nil
+	} else if cfg.clientKeysOn() {
+		log.Printf("[gatewaykey] 客户 API Key 已启用：%s（已签发 %d 把）", clientKeyPath, clientKeys.Len())
+	} else {
+		log.Printf("[gatewaykey] 客户 API Key 已配置但关闭（client_keys.enabled=false）：%s 中的 %d 把 Key 暂时无效", clientKeyPath, clientKeys.Len())
+	}
+
 	var pn *panel.Panel
 	pn = panel.New(panel.Config{
 		Pool:       p,
@@ -444,6 +469,22 @@ func main() {
 		},
 		// 积分历史账本（只读展示；写入由上面的余额观察者完成）。
 		CreditHistory: creditHist,
+		// 客户 API Key 存储（nil = 载入失败或未配置：面板显示说明而不是空表格）。
+		ClientKeys: clientKeys,
+		// 面板据开关决定是否展示 Key 管理入口（与网关认证读同一份热配置）。
+		ClientKeysEnabled: func() bool { return live.Load().ClientKeysEnabled },
+		// 面板登录：凭据同样走热配置，改完密码下一个登录请求即生效。
+		PanelAuth: func() (string, string) {
+			s := live.Load()
+			return s.PanelUser, s.PanelPass
+		},
+		PanelSessionTTL: func() time.Duration {
+			h := live.Load().PanelSessionHours
+			if h <= 0 {
+				h = 12
+			}
+			return time.Duration(h) * time.Hour
+		},
 	})
 	// 任务频道日志落盘（重启后任务结果可回溯）；失败只 WARN，不阻塞启动。
 	if err := pn.Logs().SetTaskArchive(stateSibling(cfg.StateFile, "task-logs.json")); err != nil {
@@ -499,6 +540,9 @@ func main() {
 		BudgetLimit:      cfg.Budget.DailyCreditLimit,
 		BurstCreditLimit: cfg.Budget.BurstCreditLimit,
 		CacheLowRate:     cfg.Budget.CacheLowRate,
+		// 客户 API Key：认证、绑定账户范围、每 Key 积分额度（clientkey.go）。
+		// nil = 载入失败时只剩主密钥可用（上面已打 ERROR）。
+		ClientKeys: clientKeys,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -584,6 +628,15 @@ func main() {
 		log.Printf("WARN: %s", warn)
 	}
 	log.Print(listenBanner(cfg.Listen, loadedFrom, cfg.APIKey))
+	// 面板登录状态要说清楚：没配密码时面板是「拒绝登录」而不是「敞开」，
+	// 但用户看到 401 只会以为是 bug，所以这里直接告诉他怎么配。
+	if cfg.PanelAuth.Password == "" {
+		log.Printf("WARN: 面板未配置登录密码（panel_auth.password 为空）：/panel/ 将拒绝登录。"+
+			"请在 %s 里设置 panel_auth.password（账号默认 %s）后重启",
+			cfgFileOrDefault(loadedFrom), cfg.PanelAuth.Username)
+	} else {
+		log.Printf("面板登录已启用（账号 %s，会话有效期 %dh）", cfg.PanelAuth.Username, cfg.PanelAuth.SessionHours)
+	}
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		p.Flush() // 监听失败时信号路径不会跑：这里同样兜底落盘再退
 		log.Fatalf("http: %v", err)
@@ -640,6 +693,14 @@ func warmModelRates(ctx context.Context, up *upstream.Client, p *pool.Pool) {
 func listenBanner(listen, path, key string) string {
 	return fmt.Sprintf("workbuddy2api listening on %s (api_key=%s, 来源 %s)，管理面板 http://127.0.0.1%s/panel/",
 		listen, maskSecret(key), apiKeySource(path), panelListenPath(listen))
+}
+
+// cfgFileOrDefault 报告实际加载的配置文件路径（空则给默认值说明）。
+func cfgFileOrDefault(path string) string {
+	if path == "" {
+		return "config.json（默认路径）"
+	}
+	return path
 }
 
 // apiKeySource 报生效的 api_key 来自哪里，顺序同 applyEnv：env 非空即覆盖文件。
@@ -783,6 +844,11 @@ func saveConfig(raw []byte, path string, live *livecfg.Holder, p *pool.Pool, up 
 		RecordClientInfo:     newCfg.Logging.RequestClientInfo,
 		HiddenModels:         livecfg.NormalizeHiddenModels(newCfg.Models.Hidden),
 		ModelAliases:         livecfg.NormalizeModelAliases(newCfg.Models.Aliases),
+		// 客户 Key 开关同样热生效：关掉即刻收回全部客户 Key（文件保留，重开即恢复）。
+		ClientKeysEnabled: newCfg.clientKeysOn(),
+		PanelUser:         newCfg.PanelAuth.Username,
+		PanelPass:         newCfg.PanelAuth.Password,
+		PanelSessionHours: newCfg.PanelAuth.SessionHours,
 	})
 	up.SanitizeFingerprints.Store(newCfg.Features.SanitizeBlacklistFingerprints)
 	up.SanitizeBrandScope.Store(newCfg.Features.SanitizeBrandScope)
@@ -887,6 +953,9 @@ func restartRequiredFields(current, next *Config) []string {
 	changed("logging.request_archive_enabled", current.Logging.RequestArchiveEnabled, next.Logging.RequestArchiveEnabled)
 	changed("logging.request_retention_days", current.Logging.RequestRetentionDays, next.Logging.RequestRetentionDays)
 	changed("logging.request_archive_max_mb", current.Logging.RequestArchiveMaxMB, next.Logging.RequestArchiveMaxMB)
+	// client_keys.enabled 是热生效的（走 livecfg），只有存储路径要重启；
+	// 把它列成重启项会让用户以为「打开了开关但没生效」。
+	changed("client_keys.file", current.ClientKeys.File, next.ClientKeys.File)
 	changed("server.read_timeout", current.Server.ReadTimeout, next.Server.ReadTimeout)
 	changed("server.shutdown_timeout", current.Server.ShutdownTimeout, next.Server.ShutdownTimeout)
 	return out

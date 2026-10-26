@@ -373,6 +373,44 @@ type Config struct {
 		CacheLowRate float64 `json:"cache_low_rate"`
 	} `json:"budget"`
 
+	// ClientKeys 客户 API Key 体系（面板「API Keys」页签签发、网关认证）。
+	//
+	// 与顶层 api_key 的关系：api_key 是**主密钥**，始终有效（面板自己在用，也是
+	// 未绑定流量的兜底口）；client_keys 签发的 Key 是可命名、可绑定账号、可限额的
+	// 成员密钥，挂在认证钩子上与主密钥并列。
+	//
+	// 开关与存储分离：Enabled=false 时面板不暴露管理入口、已签发的 Key 也一律不被
+	// 认证（等于一次性收回全部客户 Key），但文件保留——重新打开即恢复，不必重建。
+	//
+	// 默认 true：这套功能没有"必须先开总开关才能用"的理由——面板里建 Key 本身就
+	// 是很明确的使用意图，多一道开关只会让人找不到入口（旧面板就是直接可建）。
+	// 想整体停用的部署把它显式设成 false 即可，语义不变。
+	//
+	// Enabled 用 *bool 而不是 bool：要区分"没写这个字段"（默认开）与"显式写了
+	// false"（真关）。bool 的零值同为 false，两者会被混成一件事故——老配置里根本
+	// 没有 client_keys.enabled 这一项，用 bool 就等于把所有现存部署的客户 Key 全关了。
+	ClientKeys struct {
+		Enabled *bool `json:"enabled"`
+		// File 客户 Key 存储路径；空 = 与 state_file 同目录的 gateway_keys.json。
+		// 单独可配是为「把这个文件放 NFS / 备份卷」这类部署留口子。
+		File string `json:"file"`
+	} `json:"client_keys"`
+	// PanelAuth 面板登录账号（管理界面用，与网关 api_key 完全独立）。
+	//
+	// 为什么要分开：面板是给人用的，让人去配置文件里翻 api_key 再粘进来既不方便，
+	// 也把网关密钥扩散到了本不该需要它的地方。现在 /v1/* 只认 api_key，
+	// /panel/* 只认这里签发的会话——改面板登录不会影响任何下游客户端。
+	//
+	// 默认值在 applyDefaults 里填 wenzixi，密码必须由用户配置（不写默认密码：
+	// 背着用户预置一个弱口令比强制他配一个更危险）。Username/Password 都非空才算
+	// 配置完成；未配置时面板一律拒绝登录，不会退化成「开放访问」。
+	PanelAuth struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		// SessionHours 登录会话有效期（小时）；<=0 用默认 12 小时。
+		SessionHours int `json:"session_hours"`
+	} `json:"panel_auth"`
+
 	// 解析后
 	SoftRateDur            time.Duration `json:"-"`
 	SoftRateMaxDur         time.Duration `json:"-"`
@@ -474,6 +512,17 @@ func Default() *Config {
 	c.Alerting.ForTicks = 2
 	c.Alerting.ClearTicks = 2
 	return c
+}
+
+// clientKeysOn 返回客户 Key 功能的生效开关：未配置该字段时默认开启。
+//
+// 单独立个函数而不是在每个调用点写 (*c.ClientKeys.Enabled == nil || *...)：默认值
+// 散在多处时，改口径必然漏掉一两处，而这几处一旦不一致就是"面板说开着、网关却拒收"。
+func (c *Config) clientKeysOn() bool {
+	if c.ClientKeys.Enabled == nil {
+		return true
+	}
+	return *c.ClientKeys.Enabled
 }
 
 // Load 从文件读，再用 WB2A_* env 覆盖。
@@ -928,6 +977,19 @@ func (c *Config) normalize() error {
 	if !strings.HasPrefix(c.Listen, ":") && !strings.Contains(c.Listen, ":") {
 		c.Listen = ":" + c.Listen
 	}
+	// 面板登录账号：只补账号名默认值，**不补密码**。
+	// 预置一个默认密码比强迫用户自己配更危险（装完就能被所有人登录），
+	// 所以密码留空时面板会拒绝登录并在启动日志里提示怎么配。
+	if strings.TrimSpace(c.PanelAuth.Username) == "" {
+		c.PanelAuth.Username = "wenzixi"
+	}
+	if c.PanelAuth.SessionHours <= 0 {
+		c.PanelAuth.SessionHours = 12
+	}
+	// 上限一天：会话太长等于把「登录」这件事做废（尤其面板能改配置、能停用账号）。
+	if c.PanelAuth.SessionHours > 24 {
+		return fmt.Errorf("panel_auth.session_hours=%d 过大（上限 24）", c.PanelAuth.SessionHours)
+	}
 	// 空数组与 null 反序列化后覆盖掉 Default() 的排程值（键缺席才保留），在此补齐。
 	// 空 = 未配置 → 回落默认；「禁用」一律走 *_enabled=false，两者互不混淆。
 	if len(c.Schedule.CheckinHours) == 0 {
@@ -987,6 +1049,11 @@ func (c *Config) normalize() error {
 	}
 	if c.Admin.Enabled && strings.TrimSpace(c.APIKey) == "" {
 		return fmt.Errorf("admin.enabled=true 但 api_key 为空")
+	}
+	// 客户 Key 与主密钥同源鉴权：没有主密钥就没有「谁能管理客户 Key」，
+	// 所以打开客户 Key 必须配 api_key（空 = 网关本来就不鉴权，客户 Key 也无意义）。
+	if c.ClientKeys.Enabled != nil && *c.ClientKeys.Enabled && strings.TrimSpace(c.APIKey) == "" {
+		return fmt.Errorf("client_keys.enabled=true 但 api_key 为空（主密钥同时也是管理客户 Key 的凭证）")
 	}
 	if c.Admin.AuditEnabled {
 		if !c.Admin.Enabled {
