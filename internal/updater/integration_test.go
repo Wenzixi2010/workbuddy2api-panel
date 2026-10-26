@@ -114,7 +114,20 @@ func TestInstallReplacesRestartsAndRecovers(t *testing.T) {
 			}
 			var buf bytes.Buffer
 			zw := zip.NewWriter(&buf)
-			entry, err := zw.Create(filepath.Base(target))
+			// CreateHeader 而非 Create：zw.Create 产出的条目没有类型位
+			// （external_attr 只有 0o600，低位不是 0o100000），extractBinary 的
+			// file.Mode().IsRegular() 会判 false。真实 Release 包用 zip 工具打，
+			// 条目带正常权限位，只有这个夹具会踩到。
+			//
+			// 条目名必须是 "wb2api"（+ .exe on Windows）而不是 target 的 basename：
+			// target 取自 os.Executable()，在 `go test` 下是 updater.test / 随机名，
+			// 而 Install 里 expectedBinary 是硬编码的 "wb2api"，两者永远对不上。
+			hdr := &zip.FileHeader{Name: "wb2api", Method: zip.Deflate}
+			if runtime.GOOS == "windows" {
+				hdr.Name += ".exe"
+			}
+			hdr.SetMode(0o755)
+			entry, err := zw.CreateHeader(hdr)
 			if err != nil {
 				t.Fatal(err)
 			}
