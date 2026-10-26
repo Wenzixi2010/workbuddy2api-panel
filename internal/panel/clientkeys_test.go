@@ -60,20 +60,17 @@ func TestPanelClientKeysLifecycle(t *testing.T) {
 		t.Fatalf("create did not return a plaintext key: %v", created)
 	}
 
-	// 列表绝不能回明文——这是整个功能的安全底线（存储里只有 sha256）。
+	// 列表回显明文（key 字段）：应需求「后面也能看」，明文存档后列表直接可看。
+	// 认证仍走 sha256，明文只用于管理面展示。
 	_, list := call(t, p, "GET", "/panel/api/client_keys", "")
 	keys, _ := list["keys"].([]any)
 	if len(keys) != 1 {
 		t.Fatalf("list keys=%v", list["keys"])
 	}
-	raw, err := json.Marshal(list)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), plain) {
-		t.Fatalf("list response leaked plaintext key")
-	}
 	first, _ := keys[0].(map[string]any)
+	if got, _ := first["key"].(string); got != plain {
+		t.Fatalf("list key=%q, want plaintext %q（明文应可随时回显）", got, plain)
+	}
 	if first["name"] != "团队A" {
 		t.Fatalf("list name=%v", first["name"])
 	}
