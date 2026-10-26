@@ -66,12 +66,22 @@ type CompAccount = {
   end_time?: string
 }
 
-const STATUS_TAG: Record<QueueItem['status'], { cls: string; label: string }> = {
-  pending: { cls: 'mute', label: '待执行' },
-  running: { cls: 'warn', label: '执行中' },
-  done: { cls: 'ok', label: '完成' },
-  skipped: { cls: 'mute', label: '跳过' },
-  error: { cls: 'bad', label: '失败' },
+/** 状态 → 旧版 `.qdot` 圆点类（待执行是空心圈，未知状态同样落到 wait）。 */
+const STATUS_DOT: Record<QueueItem['status'], string> = {
+  done: 'done',
+  running: 'run',
+  pending: 'wait',
+  skipped: 'skip',
+  error: 'err',
+}
+
+/** 状态 → 旧版队列中文文案（与状态圆点配套的中文标签）。 */
+const STATUS_WORD: Record<QueueItem['status'], string> = {
+  done: '完成',
+  running: '执行中',
+  pending: '待执行',
+  skipped: '跳过',
+  error: '失败',
 }
 
 const JOB_TAG: Record<TaskJob['status'], { cls: string; label: string }> = {
@@ -239,6 +249,25 @@ export default function TasksCenterView({ onToast }: ViewProps) {
   const pendingCount = (q?.items || []).filter((i) => i.status === 'pending' || i.status === 'running').length
   const gained = (q?.items || []).reduce((s, i) => s + (i.credit || 0), 0)
 
+  /** 按账号分组（保留账号首次出现顺序）；已按 hideDone 过滤的 items 供渲染，进度按全量算。 */
+  const groups = useMemo(() => {
+    const by = new Map<string, { uid: string; nickname: string; rows: QueueItem[] }>()
+    for (const it of items) {
+      let g = by.get(it.uid)
+      if (!g) {
+        g = { uid: it.uid, nickname: it.nickname, rows: [] }
+        by.set(it.uid, g)
+      }
+      g.rows.push(it)
+    }
+    return Array.from(by.values())
+  }, [items])
+
+  /** 总进度：已完成/失败/跳过都算「已了结」，与旧版 updateProgress 口径一致。 */
+  const finishedCount = (q?.items || []).filter((i) => ['done', 'error', 'skipped'].includes(i.status)).length
+  const totalCount = q?.items?.length ?? 0
+  const progressPct = totalCount ? Math.round((finishedCount / totalCount) * 100) : 0
+
   const compRows = (comp || []).filter((r) => (hideNa ? !r.skip : true))
   const compPending = compRows.filter(
     (r) => !r.skip && !r.error && r.active && !r.claimed && (r.credit || 0) > 0,
@@ -298,43 +327,45 @@ export default function TasksCenterView({ onToast }: ViewProps) {
             </div>
           </div>
         ) : (
-          <div className="tbl-wrap">
-            <table className="acc">
-              <thead>
-                <tr>
-                  <th>账号</th>
-                  <th>任务</th>
-                  <th>状态</th>
-                  <th className="num">获得</th>
-                  <th>说明</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((it) => {
-                  const tag = STATUS_TAG[it.status] || STATUS_TAG.pending
+          <>
+            <div className="qprog">
+              <div className="qbar">
+                <i style={{ width: progressPct + '%' }} />
+              </div>
+              <div className="note">
+                {q?.running ? '执行中 ' : '已结束 '}
+                {finishedCount} / {totalCount}
+              </div>
+            </div>
+            {groups.map((g) => (
+              <div className="qgroup" key={g.uid}>
+                <header>
+                  <span className="nm">{g.nickname || String(g.uid).slice(0, 10)}</span>
+                  <span className="cnt">{g.rows.length} 项任务</span>
+                </header>
+                {g.rows.map((it) => {
+                  const dot = STATUS_DOT[it.status] || 'wait'
+                  const word = STATUS_WORD[it.status] || '待执行'
                   return (
-                    <tr key={it.uid + it.code}>
-                      <td>{it.nickname || String(it.uid).slice(0, 10)}</td>
-                      <td>
-                        <div>{it.title || it.code}</div>
-                        {it.title ? <div className="who-id mono">{it.code}</div> : null}
-                      </td>
-                      <td>
-                        <span className={'tag ' + tag.cls}>{tag.label}</span>
-                      </td>
-                      <td className="num mono">
+                    <div className="qrow" key={it.uid + it.code} title={it.message || ''}>
+                      <span className="code">{it.code}</span>
+                      <span className="name">
+                        <span className="t">{it.title || it.code}</span>
+                      </span>
+                      <span className="prog">
                         {it.credit ? fmtCredit(it.credit) : '—'}
-                        {it.energy ? <span className="dim"> · {it.energy} 能量</span> : null}
-                      </td>
-                      <td className="dim row-reason" title={it.message}>
-                        {it.message || '—'}
-                      </td>
-                    </tr>
+                      </span>
+                      <span className="st">
+                        <span className={'qdot ' + dot} />
+                        {word}
+                      </span>
+                      <span className="msg">{it.message || ''}</span>
+                    </div>
                   )
                 })}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            ))}
+          </>
         )}
       </Card>
 

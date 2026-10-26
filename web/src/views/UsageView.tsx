@@ -321,16 +321,25 @@ export default function UsageView(_props: ViewProps) {
         title={`按${dimLabel}汇总`}
         hint={`${rows.length} 行`}
         actions={
-          <Seg
-            value={dim}
-            ariaLabel="汇总维度"
-            onChange={setDim}
-            options={[
-              { value: 'account', label: '账号' },
-              { value: 'model', label: '模型' },
-              { value: 'realm', label: '域' },
-            ]}
-          />
+          <span className="vtabs">
+            {(
+              [
+                ['account', '账号'],
+                ['model', '模型'],
+                ['realm', '域'],
+              ] as const
+            ).map(([v, label]) => (
+              <button
+                key={v}
+                type="button"
+                className={dim === v ? 'on' : ''}
+                aria-pressed={dim === v}
+                onClick={() => setDim(v)}
+              >
+                {label}
+              </button>
+            ))}
+          </span>
         }
         flush
       >
@@ -340,7 +349,7 @@ export default function UsageView(_props: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="acc">
+            <table className="acc zebra">
               <thead>
                 <tr>
                   <th>{dimLabel}</th>
@@ -394,7 +403,7 @@ export default function UsageView(_props: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="acc">
+            <table className="acc zebra">
               <thead>
                 <tr>
                   <th>{dim === 'model' ? '模型' : '账号'}</th>

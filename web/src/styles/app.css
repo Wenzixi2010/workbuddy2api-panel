@@ -29,6 +29,16 @@
   flex: 1;
 }
 
+/* 面板块头右侧操作区：旧版 header 直接摆按钮、靠 .box > header 的 gap 生效；
+   React 版把它们收进 .hd-acts，需在此恢复内部间距，否则按钮贴成一条。 */
+.hd-acts {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: none;
+}
+
 /* ── 按钮 ───────────────────────────────────────────────── */
 .btn {
   appearance: none;
