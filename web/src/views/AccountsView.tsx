@@ -163,50 +163,40 @@ export default function AccountsView({ onToast }: ViewProps) {
         hint={`${shown.length}/${rows.length}`}
         actions={
           <>
-            <Seg
-              value={filter}
-              ariaLabel="筛选账号"
-              onChange={setFilter}
-              options={[
-                { value: 'all', label: '全部' },
-                { value: 'usable', label: '可用' },
-                { value: 'problem', label: '异常' },
-              ]}
-            />
             <button
               className="btn sm"
               disabled={!!batchBusy}
               onClick={() => batch('checkin_all', '全量签到')}
             >
-              签到
+              全部签到
             </button>
             <button
               className="btn sm"
               disabled={!!batchBusy}
               onClick={() => batch('travel_all', '全量旅行')}
             >
-              旅行
+              旅行巡检
             </button>
             <button
               className="btn sm"
               disabled={!!batchBusy}
               onClick={() => batch('activity_all', '活跃上报')}
             >
-              活跃
+              活跃上报
             </button>
             <button
               className="btn sm"
               disabled={!!batchBusy}
               onClick={() => batch('keepalive_all', '全量保活')}
             >
-              保活
+              全部保活
             </button>
             <button
               className="btn sm"
               disabled={!!batchBusy}
               onClick={() => batch('balance_all', '全量余额')}
             >
-              余额
+              刷新余额
             </button>
             <button className="btn sm" onClick={() => setRemarkOpen(true)}>
               备注
@@ -221,6 +211,20 @@ export default function AccountsView({ onToast }: ViewProps) {
         }
         flush
       >
+        <div className="fbar">
+          <Seg
+            value={filter}
+            ariaLabel="筛选账号"
+            onChange={setFilter}
+            options={[
+              { value: 'all', label: '全部' },
+              { value: 'usable', label: '可用' },
+              { value: 'problem', label: '异常' },
+            ]}
+          />
+          <span className="grow" />
+          <span className="note">{shown.length} 个账号</span>
+        </div>
         {shown.length === 0 ? (
           <div className="empty">
             {rows.length === 0 ? (

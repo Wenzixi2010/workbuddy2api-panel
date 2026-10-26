@@ -74,11 +74,14 @@ export function Stat({
   value,
   sub,
   tone,
+  bar,
 }: {
   label: ReactNode
   value: ReactNode
   sub?: ReactNode
   tone?: 'good' | 'warn' | 'bad' | 'accent'
+  /** kpi 形态的构成条（如总 token 卡的 prompt/completion 占比），渲染为 .kbar。 */
+  bar?: ReactNode
 }) {
   const kind = useContext(StatsCtx)
   // .stat 用 tone 类着色（good/warn/bad/accent）；.kpi 用 c-* 类（c-ok/c-warn/c-bad/c-accent）。
@@ -91,11 +94,14 @@ export function Stat({
         ? ` ${tone}`
         : ''
   const cls = kind === 'kpi' ? 'kpi' : 'stat'
+  // 副标题：旧版 kpi 用 .s、.stat 用 .sub（两种形态的类名不同，见 legacy.css）。
+  const subCls = kind === 'kpi' ? 's' : 'sub'
   return (
     <div className={cls + toneCls}>
       <div className="k">{label}</div>
       <div className="v">{value}</div>
-      {sub ? <div className="sub">{sub}</div> : null}
+      {bar ? <div className="kbar">{bar}</div> : null}
+      {sub ? <div className={subCls}>{sub}</div> : null}
     </div>
   )
 }

@@ -29,12 +29,13 @@
   flex: 1;
 }
 
-/* 面板块头右侧操作区：旧版 header 直接摆按钮、靠 .box > header 的 gap 生效；
-   React 版把它们收进 .hd-acts，需在此恢复内部间距，否则按钮贴成一条。 */
+/* 面板块头右侧操作区：旧版 header 直接摆按钮、靠 .box > header 的 gap(12px) 生效；
+   React 版把它们收进 .hd-acts，需在此恢复同一 12px 间距，否则按钮/复选框/下拉
+   贴成一条。12px 与旧版 .box > header 的 gap 一致，避免再挤。 */
 .hd-acts {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   flex-wrap: wrap;
   flex: none;
 }
