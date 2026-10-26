@@ -96,7 +96,7 @@
 .sel-note {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   font-size: 12px;
   color: var(--ink-3);
   white-space: nowrap;
