@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { errText, fmtCredit, ago } from '../lib/format'
 import { type AccountStatus, type Overview } from '../lib/types'
-import { Card, Seg, Stat, Stats, View, ViewHead } from '../components/Layout'
+import { Card, Seg, Stat, Stats, View } from '../components/Layout'
 import AddAccountDialog from '../components/AddAccountDialog'
 import RemarksDialog from '../components/RemarksDialog'
 import { useRemarks } from '../lib/remarks'
@@ -145,24 +145,6 @@ export default function AccountsView({ onToast }: ViewProps) {
 
   return (
     <View>
-      <ViewHead
-        title="账号池"
-        desc="上游账号的健康状态、额度与手动运维入口。加号可添加账号（浏览器登录 / API Key / JSON 导入）。"
-        actions={
-          <>
-            <button className="btn" onClick={() => setRemarkOpen(true)}>
-              备注
-            </button>
-            <button className="btn primary" onClick={() => setAddOpen(true)}>
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={1.8}>
-                <path d="M8 3.5v9M3.5 8h9" strokeLinecap="round" />
-              </svg>
-              添加账号
-            </button>
-          </>
-        }
-      />
-
       <Stats>
         <Stat label="账号总数" value={d.total ?? rows.length} />
         <Stat label="健康" value={d.healthy ?? '—'} tone="good" />
@@ -226,6 +208,15 @@ export default function AccountsView({ onToast }: ViewProps) {
             >
               余额
             </button>
+            <button className="btn sm" onClick={() => setRemarkOpen(true)}>
+              备注
+            </button>
+            <button className="btn sm primary" onClick={() => setAddOpen(true)}>
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth={1.8}>
+                <path d="M8 3.5v9M3.5 8h9" strokeLinecap="round" />
+              </svg>
+              添加账号
+            </button>
           </>
         }
         flush
@@ -248,7 +239,7 @@ export default function AccountsView({ onToast }: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl acc-tbl">
+            <table className="acc">
               <thead>
                 <tr>
                   <th>账号</th>

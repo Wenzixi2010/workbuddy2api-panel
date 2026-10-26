@@ -4,107 +4,14 @@
  * 外观与旧版逐像素一致、也省掉一轮视觉回归；这里只补 React 版新增的结构类。
  */
 
-/* ── 概览统计卡 ─────────────────────────────────────────── */
-.stats {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
-  gap: 10px;
-  margin-bottom: 14px;
-}
-.stat {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 11px 13px;
-}
-.stat .k {
-  color: var(--ink-3);
-  font-size: 11.5px;
-  letter-spacing: 0.02em;
-}
-.stat .v {
-  color: var(--ink);
-  font-size: 19px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  margin-top: 3px;
-  font-variant-numeric: tabular-nums;
-}
-
-/* ── 通用表格补充 ───────────────────────────────────────── */
-.tbl td.num,
-.tbl th.num {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
+/* ── 通用表格补充（旧基元 .acc 已在 legacy.css，这里只补 React 新增） ─── */
 .dim {
   color: var(--ink-3);
 }
-.tag {
-  display: inline-block;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 11px;
-  line-height: 1.7;
-  border: 1px solid var(--line);
-  color: var(--ink-2);
-  margin-left: 6px;
-  white-space: nowrap;
-}
-.tag.ok {
-  color: var(--ok);
-  border-color: color-mix(in srgb, var(--ok) 40%, var(--line));
-  background: var(--ok-soft);
-}
-.tag.warn {
-  color: var(--warn);
-  border-color: color-mix(in srgb, var(--warn) 40%, var(--line));
-  background: var(--warn-soft);
-}
-.tag.bad {
-  color: var(--bad);
-  border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
-  background: var(--bad-soft);
-}
 
-/* ── 卡片与内边距 ───────────────────────────────────────── */
-.card {
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  overflow: hidden;
-}
-.card + .card {
-  margin-top: 12px;
-}
-.card .pad {
-  padding: 16px 18px;
-}
-.card .pad h3 {
-  font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
+/* .note / .grow / .empty / .tag / .stats / .stat / .card / .box 的内容区版本
+   一律以 legacy.css 为准，这里不再重复定义，避免后加载覆盖旧样式。 */
 
-.empty {
-  padding: 40px 20px;
-  text-align: center;
-  color: var(--ink-3);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-}
-.empty.err {
-  color: var(--bad);
-  border-color: color-mix(in srgb, var(--bad) 35%, var(--line));
-  background: var(--bad-soft);
-}
-
-.note {
-  color: var(--ink-3);
-  font-size: 12.5px;
-  line-height: 1.6;
-}
 .note.err {
   color: var(--bad);
 }
@@ -161,19 +68,19 @@
   border-radius: 6px;
 }
 
-/* ── 表单 ───────────────────────────────────────────────── */
-.fld {
+/* ── 表单（仅弹窗内：旧版内容区表单用 label.fld 块式布局，见 legacy.css） ── */
+.veil .fld {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.fld > span {
+.veil .fld > span {
   color: var(--ink-2);
   font-size: 12px;
 }
-.fld input,
-.fld select,
-.fld textarea {
+.veil .fld input,
+.veil .fld select,
+.veil .fld textarea {
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -182,26 +89,16 @@
   padding: 8px 10px;
   width: 100%;
 }
-.fld input:focus,
-.fld select:focus,
-.fld textarea:focus {
+.veil .fld input:focus,
+.veil .fld select:focus,
+.veil .fld textarea:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.fld input:disabled {
+.veil .fld input:disabled {
   opacity: 0.6;
 }
-.grid2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-@media (max-width: 560px) {
-  .grid2 {
-    grid-template-columns: 1fr;
-  }
-}
+/* 内容区 .grid2/.grid3 交给 legacy.css（列距 0 20px / 0 16px，无下外边距）。 */
 
 /* ── 弹窗 ───────────────────────────────────────────────── */
 .veil {

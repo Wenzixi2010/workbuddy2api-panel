@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { errText, fmtCredit, fmtLocalDateTime } from '../lib/format'
 import { type Overview } from '../lib/types'
-import { Card, Stat, Stats, View, ViewHead } from '../components/Layout'
+import { Card, Stat, Stats, View } from '../components/Layout'
 import type { ViewProps } from './types'
 
 /** 上游套餐一行。 */
@@ -109,16 +109,6 @@ export default function PackagesView({ onToast }: ViewProps) {
 
   return (
     <View>
-      <ViewHead
-        title="积分构成"
-        desc="各账号的积分余额、到期批次与套餐归属。积分按「先到期先扣」消耗，临近过期的排前面。"
-        actions={
-          <button className="btn sm" disabled={busy} onClick={() => void loadPackages()}>
-            {busy ? '查询上游中…' : '查套餐明细'}
-          </button>
-        }
-      />
-
       <Stats>
         <Stat label="账号数" value={accts.length} />
         <Stat label="积分合计" value={fmtCredit(totalRemain)} tone="accent" />
@@ -138,7 +128,7 @@ export default function PackagesView({ onToast }: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="acc">
               <thead>
                 <tr>
                   <th>账号</th>
@@ -186,7 +176,7 @@ export default function PackagesView({ onToast }: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="acc">
               <thead>
                 <tr>
                   <th>到期日期</th>
@@ -228,7 +218,7 @@ export default function PackagesView({ onToast }: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="acc">
               <thead>
                 <tr>
                   <th>账号</th>

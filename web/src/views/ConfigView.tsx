@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { errText } from '../lib/format'
-import { Card, View, ViewHead } from '../components/Layout'
+import { Card, View } from '../components/Layout'
 import { displayVersion } from '../lib/version'
 import type { ViewProps } from './types'
 
@@ -122,20 +122,13 @@ export default function ConfigView({ onToast }: ViewProps) {
 
   return (
     <View>
-      <ViewHead
-        title="配置"
-        desc="生效中的配置快照与版本更新。改配置文件保存后即时生效，无需重启。"
-        actions={
-          <button className="btn" onClick={() => void load()}>
-            重新读取
-          </button>
-        }
-      />
-
       <Card
         title="版本"
         actions={
           <>
+            <button className="btn sm" onClick={() => void load()}>
+              重新读取
+            </button>
             <button className="btn sm" disabled={checking} onClick={() => void checkUpdate()}>
               {checking ? '检查中…' : '检查更新'}
             </button>

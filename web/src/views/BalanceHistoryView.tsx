@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { errText, fmtCredit } from '../lib/format'
-import { Card, Seg, Stat, Stats, View, ViewHead } from '../components/Layout'
+import { Card, Seg, Stat, Stats, View } from '../components/Layout'
 import type { ViewProps } from './types'
 
 /** internal/balance 的 Point / Daily / Series 前端投影。 */
@@ -125,29 +125,6 @@ export default function BalanceHistoryView(_props: ViewProps) {
 
   return (
     <View>
-      <ViewHead
-        title="余额趋势"
-        desc="各账号积分余额随时间的变化。每 5 分钟采样一次，超过 30 天的数据折叠为日粒度。"
-        actions={
-          <>
-            <Seg value={days} onChange={setDays} ariaLabel="时间范围" options={RANGES} />
-            <Seg
-              value={realm}
-              ariaLabel="域筛选"
-              onChange={setRealm}
-              options={[
-                { value: 'all', label: '全部' },
-                { value: 'cn', label: '国内' },
-                { value: 'global', label: '国际' },
-              ]}
-            />
-            <button className="btn sm" disabled={busy} onClick={() => void load(days)}>
-              {busy ? '刷新中…' : '刷新'}
-            </button>
-          </>
-        }
-      />
-
       {err ? <div className="note err">{err}</div> : null}
 
       <Stats>
@@ -169,7 +146,28 @@ export default function BalanceHistoryView(_props: ViewProps) {
           <div className="empty-desc">这段时间还没有余额记录。余额每 5 分钟采样，运行一段时间后就有数据。</div>
         </div>
       ) : (
-        <Card title="各账号趋势" hint={`${shown.length} 个账号`}>
+        <Card
+          title="余额趋势"
+          hint={`${shown.length} 个账号`}
+          actions={
+            <>
+              <Seg value={days} onChange={setDays} ariaLabel="时间范围" options={RANGES} />
+              <Seg
+                value={realm}
+                ariaLabel="域筛选"
+                onChange={setRealm}
+                options={[
+                  { value: 'all', label: '全部' },
+                  { value: 'cn', label: '国内' },
+                  { value: 'global', label: '国际' },
+                ]}
+              />
+              <button className="btn sm" disabled={busy} onClick={() => void load(days)}>
+                {busy ? '刷新中…' : '刷新'}
+              </button>
+            </>
+          }
+        >
           <div className="spark-grid">
             {shown.map((s) => (
               <div className="spark" key={s.uid}>
@@ -202,7 +200,7 @@ export default function BalanceHistoryView(_props: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="acc">
               <thead>
                 <tr>
                   <th>日期</th>

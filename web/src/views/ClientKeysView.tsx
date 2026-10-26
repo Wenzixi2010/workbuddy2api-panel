@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { ago, errText, fmtCredit } from '../lib/format'
 import type { BindableAccount, ClientKey, ClientKeysResp } from '../lib/types'
-import { Card, Stat, Stats, View, ViewHead } from '../components/Layout'
+import { Card, Stat, Stats, View } from '../components/Layout'
 import type { ViewProps } from './types'
 import KeyEditor from '../components/KeyEditor'
 
@@ -74,7 +74,6 @@ export default function ClientKeysView({ onToast }: ViewProps) {
   if (!data.enabled) {
     return (
       <View>
-        <ViewHead title="API Keys" desc="客户 Key 的签发与管理。" />
         <Card title="客户 API Key 已停用">
           <div className="empty">
             <div className="empty-title">功能已关闭</div>
@@ -95,16 +94,6 @@ export default function ClientKeysView({ onToast }: ViewProps) {
 
   return (
     <View>
-      <ViewHead
-        title="API Keys"
-        desc="签发给下游使用的客户 Key。可绑定专属账号、设积分额度；明文只在创建时显示一次。"
-        actions={
-          <button className="btn primary" onClick={() => setEditing('new')}>
-            新建 Key
-          </button>
-        }
-      />
-
       <Stats>
         <Stat label="Key 总数" value={keys.length} />
         <Stat label="可用" value={enabled} tone="good" />
@@ -129,14 +118,19 @@ export default function ClientKeysView({ onToast }: ViewProps) {
           title="Key 列表"
           hint={`${keys.length} 把 · ${data.path || ''}`}
           actions={
-            <button className="btn sm" onClick={() => void load()}>
-              刷新
-            </button>
+            <>
+              <button className="btn sm" onClick={() => void load()}>
+                刷新
+              </button>
+              <button className="btn sm primary" onClick={() => setEditing('new')}>
+                新建 Key
+              </button>
+            </>
           }
           flush
         >
           <div className="tbl-wrap">
-          <table className="tbl ck-tbl">
+          <table className="acc ck-tbl">
             <thead>
               <tr>
                 <th>名称</th>

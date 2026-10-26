@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { errText, fmtCredit, fmtK } from '../lib/format'
-import { Card, Seg, Stat, Stats, View, ViewHead } from '../components/Layout'
+import { Card, Seg, Stat, Stats, View } from '../components/Layout'
 import type { ViewProps } from './types'
 
 /** internal/reqlog.Event 的前端投影。 */
@@ -191,22 +191,6 @@ export default function EventsView({ onToast }: ViewProps) {
 
   return (
     <View>
-      <ViewHead
-        title="请求事件日志"
-        desc="网关每条请求的归档记录，含模型、账号、耗时与 token 用量，可按结果筛选并导出 CSV。"
-        actions={
-          <>
-            <Seg value={hours} onChange={setHours} ariaLabel="时间范围" options={RANGES} />
-            <button className="btn sm" disabled={busy} onClick={() => void load()}>
-              {busy ? '刷新中…' : '刷新'}
-            </button>
-            <button className="btn sm" disabled={!rows.length} onClick={exportCSV}>
-              导出 CSV
-            </button>
-          </>
-        }
-      />
-
       <Stats>
         <Stat label="请求数" value={rows.length} sub={`上限 ${limit}`} />
         <Stat label="成功" value={okCount} tone="good" />
@@ -233,7 +217,7 @@ export default function EventsView({ onToast }: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="acc">
               <thead>
                 <tr>
                   <th>账号</th>
@@ -276,6 +260,13 @@ export default function EventsView({ onToast }: ViewProps) {
         hint={`${rows.length} 条`}
         actions={
           <>
+            <Seg value={hours} onChange={setHours} ariaLabel="时间范围" options={RANGES} />
+            <button className="btn sm" disabled={busy} onClick={() => void load()}>
+              {busy ? '刷新中…' : '刷新'}
+            </button>
+            <button className="btn sm" disabled={!rows.length} onClick={exportCSV}>
+              导出 CSV
+            </button>
             <select className="inp sm" value={fModel} onChange={(e) => setFModel(e.target.value)}>
               <option value="">全部模型</option>
               {models.map((m) => (
@@ -320,7 +311,7 @@ export default function EventsView({ onToast }: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl log-tbl">
+            <table className="acc req">
               <thead>
                 <tr>
                   <th>时间</th>

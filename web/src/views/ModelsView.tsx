@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { errText, fmtCredit } from '../lib/format'
 import { type AccountStatus, type Overview } from '../lib/types'
-import { Card, Seg, Stat, Stats, View, ViewHead } from '../components/Layout'
+import { Card, Seg, Stat, Stats, View } from '../components/Layout'
 import type { ViewProps } from './types'
 
 /** /panel/api/models 里一条模型目录项（字段由上游透传，只取用到的）。 */
@@ -109,7 +109,6 @@ export default function ModelsView(_props: ViewProps) {
   if (err && !resp) {
     return (
       <View>
-        <ViewHead title="模型与档位" />
         <div className="empty err">读取失败：{err}</div>
         <button className="btn" onClick={() => void loadModels()}>
           重试
@@ -120,16 +119,6 @@ export default function ModelsView(_props: ViewProps) {
 
   return (
     <View>
-      <ViewHead
-        title="模型与档位"
-        desc="上游可用模型目录、计费倍率与繁忙度。目录来自实时代理查询，会缓存在内存里。"
-        actions={
-          <button className="btn sm" disabled={busy} onClick={() => void loadModels()}>
-            {busy ? '查询中…' : '刷新目录'}
-          </button>
-        }
-      />
-
       <Stats>
         <Stat label="模型总数" value={resp?.models.length ?? '—'} />
         <Stat label="筛选后" value={rows.length} />
@@ -151,6 +140,9 @@ export default function ModelsView(_props: ViewProps) {
         hint={`${rows.length} / ${resp?.models.length ?? 0}`}
         actions={
           <>
+            <button className="btn sm" disabled={busy} onClick={() => void loadModels()}>
+              {busy ? '查询中…' : '刷新目录'}
+            </button>
             <input
               className="inp sm"
               placeholder="搜索模型"
@@ -189,7 +181,7 @@ export default function ModelsView(_props: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="acc">
               <thead>
                 <tr>
                   <th>模型</th>
@@ -243,7 +235,7 @@ export default function ModelsView(_props: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="acc">
               <thead>
                 <tr>
                   <th>账号</th>

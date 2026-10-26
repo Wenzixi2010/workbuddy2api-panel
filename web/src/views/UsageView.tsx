@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { errText, fmtCredit, fmtK } from '../lib/format'
-import { Card, Seg, Stat, Stats, View, ViewHead } from '../components/Layout'
+import { Card, Seg, Stat, Stats, View } from '../components/Layout'
 import StackedBars, { type BarPoint } from '../components/StackedBars'
 import type { ViewProps } from './types'
 
@@ -196,24 +196,7 @@ export default function UsageView(_props: ViewProps) {
 
   return (
     <View>
-      <ViewHead
-        title="使用情况"
-        desc={
-          d.window_from || d.window_to
-            ? `统计区间 ${d.window_from || '起始'} → ${d.window_to || '现在'}`
-            : `最近 ${win} 小时的调用量、token 与积分扣费。积分只统计上游明确返回 usage.credit 的请求。`
-        }
-        actions={
-          <>
-            <Seg value={win} onChange={setWin} ariaLabel="时间窗口" options={WINDOWS} />
-            <button className="btn sm" disabled={busy} onClick={() => void load(win)}>
-              {busy ? '刷新中…' : '刷新'}
-            </button>
-          </>
-        }
-      />
-
-      <Stats>
+      <Stats variant="kpi">
         <Stat label="请求数" value={fmtK(t.requests || 0)} sub={t.errors ? `${t.errors} 失败` : undefined} />
         <Stat label="输入 token" value={fmtK(t.prompt_tokens || 0)} />
         <Stat label="输出 token" value={fmtK(t.completion_tokens || 0)} />
@@ -234,7 +217,15 @@ export default function UsageView(_props: ViewProps) {
       <Card
         title="当前请求"
         hint={live ? `进程启动于 ${new Date(live.started_at).toLocaleString()}` : '每 5 秒刷新'}
-        actions={<span className={'live-dot' + (live && live.in_flight > 0 ? ' busy' : '')} />}
+        actions={
+          <>
+            <Seg value={win} onChange={setWin} ariaLabel="时间窗口" options={WINDOWS} />
+            <button className="btn sm" disabled={busy} onClick={() => void load(win)}>
+              {busy ? '刷新中…' : '刷新'}
+            </button>
+            <span className={'live-dot' + (live && live.in_flight > 0 ? ' busy' : '')} />
+          </>
+        }
         flush
       >
         {!live ? (
@@ -275,7 +266,7 @@ export default function UsageView(_props: ViewProps) {
               </div>
             ) : (
               <div className="tbl-wrap">
-                <table className="tbl log-tbl">
+                <table className="acc req">
                   <thead>
                     <tr>
                       <th>时间</th>
@@ -349,7 +340,7 @@ export default function UsageView(_props: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="acc">
               <thead>
                 <tr>
                   <th>{dimLabel}</th>
@@ -403,7 +394,7 @@ export default function UsageView(_props: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="acc">
               <thead>
                 <tr>
                   <th>{dim === 'model' ? '模型' : '账号'}</th>

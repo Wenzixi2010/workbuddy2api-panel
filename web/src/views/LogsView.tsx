@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { errText, fmtCredit, fmtK } from '../lib/format'
-import { Card, Seg, Stat, Stats, View, ViewHead } from '../components/Layout'
+import { Card, Seg, Stat, Stats, View } from '../components/Layout'
 import type { ViewProps } from './types'
 
 /** 一条请求事件（internal/reqlog.Event 的前端投影）。 */
@@ -117,19 +117,6 @@ export default function LogsView(_p: ViewProps) {
 
   return (
     <View>
-      <ViewHead
-        title="运行日志"
-        desc="网关请求事件与实时服务日志。事件来自 JSONL 归档，可按时间窗口与结果筛选。"
-        actions={
-          <>
-            <Seg value={hours} onChange={setHours} ariaLabel="时间窗口" options={WINDOWS} />
-            <button className="btn sm" disabled={busy} onClick={() => void loadEvents()}>
-              {busy ? '刷新中…' : '刷新'}
-            </button>
-          </>
-        }
-      />
-
       <Stats>
         <Stat label="请求数" value={entries.length} sub={`上限 ${limit}`} />
         <Stat label="成功" value={okCount} tone="good" />
@@ -146,6 +133,10 @@ export default function LogsView(_p: ViewProps) {
         hint={`${entries.length} 条`}
         actions={
           <>
+            <Seg value={hours} onChange={setHours} ariaLabel="时间窗口" options={WINDOWS} />
+            <button className="btn sm" disabled={busy} onClick={() => void loadEvents()}>
+              {busy ? '刷新中…' : '刷新'}
+            </button>
             <input
               className="inp sm"
               placeholder="按模型过滤"
@@ -173,7 +164,7 @@ export default function LogsView(_p: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl log-tbl">
+            <table className="acc req">
               <thead>
                 <tr>
                   <th>时间</th>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { errText, fmtCredit } from '../lib/format'
-import { Card, Stat, Stats, View, ViewHead } from '../components/Layout'
+import { Card, Stat, Stats, View } from '../components/Layout'
 import VouchersDialog from '../components/VouchersDialog'
 import type { ViewProps } from './types'
 
@@ -248,24 +248,6 @@ export default function TasksCenterView({ onToast }: ViewProps) {
 
   return (
     <View>
-      <ViewHead
-        title="任务中心"
-        desc="成长任务队列、账号后台作业与官方补偿。扫描只是把待做任务列出来，点「跑队列」才真正执行。"
-        actions={
-          <>
-            <button className="btn sm" onClick={() => setVcOpen(true)}>
-              我的券码
-            </button>
-            <button className="btn sm" disabled={!!busy} onClick={() => void scan()}>
-              {busy === 'scan' ? '扫描中…' : '扫描任务'}
-            </button>
-            <button className="btn sm primary" disabled={!!busy || q?.running} onClick={() => void runQueue()}>
-              {q?.running ? '队列运行中…' : '跑队列'}
-            </button>
-          </>
-        }
-      />
-
       {err ? <div className="note err">{err}</div> : null}
 
       <Stats>
@@ -282,6 +264,15 @@ export default function TasksCenterView({ onToast }: ViewProps) {
         hint={q ? `共 ${q.total} 项` : undefined}
         actions={
           <>
+            <button className="btn sm" onClick={() => setVcOpen(true)}>
+              我的券码
+            </button>
+            <button className="btn sm" disabled={!!busy} onClick={() => void scan()}>
+              {busy === 'scan' ? '扫描中…' : '扫描任务'}
+            </button>
+            <button className="btn sm primary" disabled={!!busy || q?.running} onClick={() => void runQueue()}>
+              {q?.running ? '队列运行中…' : '跑队列'}
+            </button>
             <span className="sel-note">
               并发
               <select className="inp sm" value={conc} onChange={(e) => setConc(Number(e.target.value))}>
@@ -308,7 +299,7 @@ export default function TasksCenterView({ onToast }: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="acc">
               <thead>
                 <tr>
                   <th>账号</th>
@@ -354,7 +345,7 @@ export default function TasksCenterView({ onToast }: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="acc">
               <thead>
                 <tr>
                   <th>账号</th>
@@ -425,7 +416,7 @@ export default function TasksCenterView({ onToast }: ViewProps) {
           </div>
         ) : (
           <div className="tbl-wrap">
-            <table className="tbl">
+            <table className="acc">
               <thead>
                 <tr>
                   <th>账号</th>

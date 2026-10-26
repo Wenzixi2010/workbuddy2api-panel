@@ -1,11 +1,12 @@
-import type { ReactNode } from 'react'
+import { createContext, useContext, type ReactNode } from 'react'
 
 /**
- * 视图骨架组件。
+ * 内容区骨架组件。
  *
- * 存在的理由：间距节奏最容易出错的地方，是每个视图各写一套「卡片 + 标题 + 按钮」
- * 的结构——一旦漏了外边距，元素就贴到一起、圆角啃圆角。把结构收进这几个组件后，
- * 间距只由 .view 的 gap 决定，视图作者不需要（也没法）各自调。
+ * 本版回到旧面板的视觉语言：内容区是一块流式文档，一个功能区一张 `.box`
+ * （header 放标题/hint/操作，正文用 .pad 或贴边表格），统计是连续的统计条，
+ * 表格用旧版 `.acc` 密度。间距由 legacy.css 的 `.box { margin-bottom }` 与
+ * 这里的 `.view > .stats` 补丁负责，视图作者不再各自处理「页头 + 卡片」三层结构。
  */
 
 type ViewProps = {
@@ -13,33 +14,18 @@ type ViewProps = {
   className?: string
 }
 
-/** 视图容器：纵向节奏的唯一负责人（CSS 里 .view 用 flex + gap）。 */
+/** 视图容器：纵向节奏的唯一负责人（CSS 里 .view 用流式布局）。 */
 export function View({ children, className }: ViewProps) {
   return <div className={'view' + (className ? ' ' + className : '')}>{children}</div>
 }
 
-/** 页头：标题 + 说明 + 右侧操作区。 */
-export function ViewHead({
-  title,
-  desc,
-  actions,
-}: {
-  title: ReactNode
-  desc?: ReactNode
-  actions?: ReactNode
-}) {
-  return (
-    <div className="view-head">
-      <div className="vh-main">
-        <h3>{title}</h3>
-        {desc ? <div className="vh-desc">{desc}</div> : null}
-      </div>
-      {actions ? <div className="vh-acts">{actions}</div> : null}
-    </div>
-  )
-}
-
-/** 卡片：可选标题栏（带 hint 与右侧操作）与页脚。 */
+/**
+ * 内容区块：沿用旧面板的 `.box > header + 内容` 结构。
+ *
+ * 这不是单纯换类名。旧版的视觉边界是「一整个功能区一张卡」：标题、hint、
+ * 右侧操作都在 header，表格直接贴边，普通内容才加 .pad。React 第一版把它拆成
+ * 页头、统计小卡、内容卡三层，信息密度和旧版完全不同，所以这里回到旧结构。
+ */
 export function Card({
   title,
   hint,
@@ -50,22 +36,19 @@ export function Card({
   className,
 }: {
   title?: ReactNode
-  /** 标题旁的小灰字说明，放「这个区块怎么算的」这类补充信息。 */
   hint?: ReactNode
-  /** 标题栏右侧的操作按钮。 */
   actions?: ReactNode
   children: ReactNode
-  /** 页脚（合计、说明、分页）。 */
   footer?: ReactNode
-  /** 内容自带贴边需求（表格）时为 true，去掉内边距。 */
+  /** 表格等贴边内容不加 .pad；其余内容与旧版一样使用 17px 内边距。 */
   flush?: boolean
   className?: string
 }) {
   const hasHead = title !== undefined || actions !== undefined
   return (
-    <section className={'card' + (className ? ' ' + className : '')}>
+    <section className={'box' + (className ? ' ' + className : '')}>
       {hasHead ? (
-        <header className="card-hd">
+        <header>
           {title !== undefined ? (
             <h3>
               {title}
@@ -76,13 +59,16 @@ export function Card({
           {actions ? <div className="hd-acts">{actions}</div> : null}
         </header>
       ) : null}
-      <div className={'card-bd' + (flush ? ' flush' : '')}>{children}</div>
-      {footer ? <footer className="card-ft">{footer}</footer> : null}
+      {flush ? children : <div className="pad">{children}</div>}
+      {footer ? <footer className="box-ft">{footer}</footer> : null}
     </section>
   )
 }
 
-/** 统计卡一枚。tone 决定左侧色条语义色。 */
+/** 统计条形态：stats = 旧版 .stats 连续统计带；kpi = 旧版 .kpis 独立小卡。 */
+const StatsCtx = createContext<'stats' | 'kpi'>('stats')
+
+/** 统计项：按外层 Stats 的形态输出 .stat（带内网格）或 .kpi（独立卡）。 */
 export function Stat({
   label,
   value,
@@ -94,8 +80,19 @@ export function Stat({
   sub?: ReactNode
   tone?: 'good' | 'warn' | 'bad' | 'accent'
 }) {
+  const kind = useContext(StatsCtx)
+  // .stat 用 tone 类着色（good/warn/bad/accent）；.kpi 用 c-* 类（c-ok/c-warn/c-bad/c-accent）。
+  const toneCls =
+    kind === 'kpi'
+      ? tone
+        ? ` c-${tone === 'good' ? 'ok' : tone}`
+        : ''
+      : tone
+        ? ` ${tone}`
+        : ''
+  const cls = kind === 'kpi' ? 'kpi' : 'stat'
   return (
-    <div className={'stat' + (tone ? ' ' + tone : '')}>
+    <div className={cls + toneCls}>
       <div className="k">{label}</div>
       <div className="v">{value}</div>
       {sub ? <div className="sub">{sub}</div> : null}
@@ -103,9 +100,16 @@ export function Stat({
   )
 }
 
-/** 统计卡容器。 */
-export function Stats({ children }: { children: ReactNode }) {
-  return <div className="stats">{children}</div>
+/**
+ * 统计条：账号池等使用旧版 .stats；用量使用旧版 .kpis。
+ * 两种都是区块内连续的统计带，不是彼此悬浮的小卡片。
+ */
+export function Stats({ children, variant = 'stats' }: { children: ReactNode; variant?: 'stats' | 'kpi' }) {
+  return (
+    <StatsCtx.Provider value={variant}>
+      <div className={variant === 'kpi' ? 'kpis' : 'stats auto'}>{children}</div>
+    </StatsCtx.Provider>
+  )
 }
 
 /** 分段控件（互斥多选一）。 */
