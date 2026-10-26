@@ -72,6 +72,7 @@ func newTaskJobTestPanel(t *testing.T, uid string, realm string, serverState *ta
 	client.HTTP = &http.Client{Timeout: 5 * time.Second}
 	client.ChatBaseCN, client.BillingBaseCN, client.WebBaseCN = server.URL, server.URL, server.URL
 	p := New(Config{
+		PanelAuth: func() (string, string) { return testUser, testPass },
 		Pool:             accounts,
 		Upstream:         client,
 		AutoTasksEnabled: func() bool { return true },
@@ -116,6 +117,7 @@ func TestAccountTaskAutoAllRespondsImmediatelyAndIgnoresDisconnect(t *testing.T)
 	requestCtx, disconnect := context.WithCancel(context.Background())
 	r := httptest.NewRequest(http.MethodPost, "/panel/api/accounts/task-job-disconnect/tasks/auto_all", nil).WithContext(requestCtx)
 	w := httptest.NewRecorder()
+	r.AddCookie(sessionFor(t, p))
 	p.ServeHTTP(w, r)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("status = %d, want 202; body=%s", w.Code, w.Body.String())
@@ -183,6 +185,7 @@ func TestStartGlobalTaskJobDoesNotCallUpstream(t *testing.T) {
 	p, _, _ := newTaskJobTestPanel(t, "task-job-global", "global", state)
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/panel/api/accounts/task-job-global/tasks/auto_all", nil)
+	r.AddCookie(sessionFor(t, p))
 	p.ServeHTTP(w, r)
 	if w.Code != http.StatusNotImplemented {
 		t.Fatalf("status = %d, want 501; body=%s", w.Code, w.Body.String())
@@ -274,7 +277,7 @@ func TestTaskJobsRecoverInterruptedWorkAndStopBetweenRequests(t *testing.T) {
 	t.Cleanup(func() { state.open(); server.Close() })
 	client.HTTP = &http.Client{Timeout: 5 * time.Second}
 	client.ChatBaseCN, client.BillingBaseCN, client.WebBaseCN = server.URL, server.URL, server.URL
-	restarted := New(Config{Pool: accounts, Upstream: client, AutoTasksEnabled: func() bool { return true }})
+	restarted := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Pool: accounts, Upstream: client, AutoTasksEnabled: func() bool { return true }})
 	appCtx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() { cancel(); restarted.StopTaskJobs() })
 	if err := restarted.StartTaskJobs(appCtx, path); err != nil {
@@ -342,7 +345,7 @@ func TestResumedJobDoesNotClaimPreviouslyClaimedTask(t *testing.T) {
 	client := upstream.New()
 	client.HTTP = &http.Client{Timeout: 5 * time.Second}
 	client.ChatBaseCN, client.BillingBaseCN, client.WebBaseCN = server.URL, server.URL, server.URL
-	p := New(Config{Pool: accounts, Upstream: client, AutoTasksEnabled: func() bool { return true }})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Pool: accounts, Upstream: client, AutoTasksEnabled: func() bool { return true }})
 	path := filepath.Join(t.TempDir(), "task-jobs.json")
 	now := time.Now().UTC()
 	raw, err := json.Marshal(taskJobFile{Version: 1, Jobs: []TaskJob{{

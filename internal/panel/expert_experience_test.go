@@ -125,7 +125,7 @@ func newExpertExperienceTestPanel(t *testing.T, f *expertFake) (*Panel, *auth.Au
 	t.Cleanup(srv.Close)
 	client := upstream.New()
 	client.ChatBaseCN, client.WebBaseCN, client.BillingBaseCN = srv.URL, srv.URL, srv.URL
-	p := New(Config{Upstream: client})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Upstream: client})
 	return p, &auth.Auth{UID: "expert-experience-test", AccessToken: "token"}
 }
 

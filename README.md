@@ -235,7 +235,31 @@ flowchart LR
 **只有人类能做**（Agent 到此必须停下并交接，不得自行"想办法"）：
 
 - OAuth 设备授权（面板 `http://127.0.0.1:7863/panel/` 或 `./login.sh`）——需要浏览器与账号持有人本人；
-- `api_key` 的取值与保管。
+- `api_key` 的取值与保管；
+- **面板登录密码**（`panel_auth.password`）的设定与保管。
+
+### 面板登录（账号密码）
+
+面板与网关是两套独立的鉴权：
+
+| 入口 | 凭证 | 说明 |
+| --- | --- | --- |
+| `/v1/*`、`/status` | `api_key`（Bearer） | 给客户端程序用，改面板登录不影响它 |
+| `/panel/*` | 账号 + 密码（会话 Cookie） | 给人用 |
+
+配置：
+
+```json
+"panel_auth": { "username": "wenzixi", "password": "你的密码", "session_hours": 12 }
+```
+
+- `username` 缺省为 `wenzixi`；**`password` 没有默认值**——留空时面板会拒绝一切登录并在启动日志里
+  提示怎么配，而不是敞开（把"忘了配"当成"开放访问"对能改配置、能停用账号的面板来说最危险）。
+- `session_hours` 缺省 12，上限 24。会话存进程内存，**重启即全员登出**（重启常伴随配置或二进制
+  变更，重新认证更安全）。
+- 改完密码保存配置即热生效，旧会话在你下次呼出面板时失效（下次登录用新密码）。
+- 会话 Cookie 是 `HttpOnly` + `SameSite=Strict` + `Path=/panel`：JS 读不到，跨站请求不带，
+  也不会随 `/v1` 请求外发。走 HTTPS 时自动加 `Secure`。
 
 **硬性禁止**：
 
@@ -494,6 +518,8 @@ curl -s http://localhost:7863/v1/messages \
 | `session_sticky.enabled` | `true` | 会话粘性路由开关 |
 | `session_sticky.ttl` | `30m` | 会话绑定 TTL（滚动续期） |
 | `session_sticky.gc_interval` | `5m` | 过期绑定 GC 周期 |
+| `client_keys.enabled` | `false` | **客户 API Key 总开关**：打开后可在面板「API Keys」页签发下游 Key（每把可绑定若干账号独占使用、可设每 Key 的积分额度）。关闭即一次性收回全部已签发 Key（文件保留，重开恢复）。需要 `api_key` 非空。**热生效** |
+| `client_keys.file` | 空 | 客户 Key 存储路径；空 = `state_file` 同目录的 `gateway_keys.json`（权限 0600，内容只有 sha256，不存明文）。改动需重启 |
 
 ### 上游超时语义（三段各归其位）
 
@@ -505,11 +531,51 @@ curl -s http://localhost:7863/v1/messages \
 
 聊天流（`stream` true / false 均同）**没有总时长上限**：聊天使用 `Timeout=0` 的专用 client，长思考 / 长输出不会被掐断。
 
+## 客户 API Key（下游子 Key）
+
+给「除自己以外的调用方」发凭证用的：一把 Key 一个名字、可绑定若干账号独占使用、可设积分额度，
+过期/超限/停用即时生效，不必动 `api_key`、也不必一张配置改一次重启。
+
+**与 `api_key` 的关系**：`api_key` 是主密钥，永远有效（面板也在用它，并且是未绑定流量的兜底口）；
+客户 Key 是可管理的成员凭证，与主密钥并列挂在同一条认证路径上。两者在 OpenAI 的
+`Authorization: Bearer` 与 Anthropic 的 `x-api-key` 两种携带方式下都认。
+
+### 签发与管理
+
+面板「API Keys」页 → 新建 Key：填名称（必填）、备注、绑定账号、额度周期与上限。
+
+| 能力 | 说明 |
+|---|---|
+| 明文只显示一次 | 服务端只存 `sha256` 与末 4 位提示（`••••a1b2`）。丢了就**轮换**（旧 key 立即失效，绑定与额度设置保留） |
+| 绑定账号 = 独占 | 绑了之后这把 Key 只从这些号里选；**同时这些号也不再服务主密钥与其他未绑定的 Key**。想让两方共享就都不绑定，或让多把 Key 绑同一批号 |
+| 绑定在选号三处都生效 | 普通轮换、会话粘性（粘性号越界即解绑）、以及全池冷却时的兜底选号。漏掉任一处都会让独占形同虚设 |
+| 积分额度 | 周期 `day`（北京时间 0 点重置）或 `total`（累计，不自动重置；用尽后点「重置额度」开新一轮）；也可不限额 |
+| 额度口径 | **只累加上游实测回报的 `usage.credit`**。上游没回报的请求计入「未知」列，**不扣额度也不当成 0 花费**——把未知记成 0 会让一次上游缺字段就把额度判成用不完 |
+| 停用 / 删除 | 停用保留 Key 与统计（立刻 401 `client_key_disabled`）；删除不可恢复 |
+
+### 客户端行为
+
+- 额度用尽 → HTTP 429 `client_key_quota_exceeded`；被停用 → 401 `client_key_disabled`。
+- 绑定的号全都不健康时 → 503 `client_key_no_account`（与「账号池真的空」区分开，避免用户去查账号池）。
+- 响应头带 `X-Client-Key`（名称/id）、`X-Credit-Limit`、`X-Credit-Remaining`、`X-Credit-Period`，客户端可自行显示余量。
+- `GET /status` 的 `client_key` 字段回**本 Key 自己**的额度快照（主密钥为 `null`）——
+  不列其他 Key 的用量，否则任意一把 Key 都能看到同池客户的消耗。
+- 请求事件日志（面板「请求事件日志」与 JSONL 归档）新增 `client_key` 字段，记录这把请求用的是哪把 Key。
+
+### 存储与运维
+
+`data/gateway_keys.json`（`client_keys.file` 可改），权限 `0600`，原子替换并保留 `.bak`；
+载入失败不会拦死启动——打 `ERROR` 并降级为「本轮只有主密钥可用」。额度游标（本周期已用）只在内存里，
+进程重启后从 0 重新累计；累计总额度因此建议只在「靠重启不会超支」的场景使用，或配成每日额度。
+
 ### 环境变量覆盖
 
 加载顺序：JSON 文件 → `WB2A_*` 环境变量（变量非空才覆盖）：
 
 `WB2A_LISTEN` · `WB2A_API_KEY` · `WB2A_AUTH_DIR` · `WB2A_STATE_FILE` · `WB2A_MAX_BODY_MB` · `WB2A_SOFT_RATE`(duration) · `WB2A_SOFT_RATE_MAX`(duration) · `WB2A_TIMEOUT_SECONDS` · `WB2A_HEADER_TIMEOUT_SECONDS` · `WB2A_IDLE_TIMEOUT_SECONDS` · `WB2A_USER_AGENT` · `WB2A_SANITIZE_FINGERPRINTS`(bool) · `WB2A_PROMPT_MODE` · `WB2A_PROMPT_FILE`
+
+客户 API Key 开关只走配置文件 / 面板（`client_keys.enabled`），没有环境变量——它是运行期
+随时可拨的运营开关，塞进 env 会让「容器里关不掉」变成一个新的坑。
 
 ## 核心行为语义
 

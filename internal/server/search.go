@@ -106,6 +106,11 @@ func ensureJSONString(item map[string]json.RawMessage, key string) {
 }
 
 func (h *Handler) search(w http.ResponseWriter, r *http.Request) {
+	if bad, why := h.clientKeyExhausted(r); bad {
+		writeOpenAIError(w, http.StatusTooManyRequests, "client_key_quota_exceeded", why)
+		return
+	}
+	h.clientKeyQuotaHeaders(w, r)
 	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request", "read body: "+err.Error())
@@ -143,7 +148,7 @@ func (h *Handler) search(w http.ResponseWriter, r *http.Request) {
 	}
 	var lastErr error
 	for attempt := 0; attempt < searchAttempts; attempt++ {
-		a := h.cfg.Pool.PickExcludingForRealm(tried, "", realm)
+		a := h.cfg.Pool.PickExcludingForRealmFiltered(tried, "", realm, h.clientKeyFilter(r))
 		if a == nil {
 			break
 		}

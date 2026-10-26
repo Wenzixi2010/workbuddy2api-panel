@@ -31,6 +31,7 @@ import (
 	"strings"
 
 	"github.com/misakano7545/workbuddy2api-panel/internal/logfmt"
+	"github.com/misakano7545/workbuddy2api-panel/internal/pool"
 	"github.com/misakano7545/workbuddy2api-panel/internal/session"
 	"github.com/misakano7545/workbuddy2api-panel/internal/upstream"
 )
@@ -71,7 +72,10 @@ func webSearchFunction(name string) map[string]any {
 // searchAugment 探测→检索→注入。返回 nil body 表示没有可注入的内容（探测失败、模型没用
 // 搜索、检索全部失败），调用方按普通对话继续；prelude 是给 Anthropic 客户端回报的
 // server_tool_use / web_search_tool_result 块（Responses 侧暂不合成等价 output item）。
-func (h *Handler) searchAugment(ctx context.Context, chat []byte, tool serverSearchTool) ([]byte, []any) {
+//
+// filter 来自客户 Key 的账号范围：网关侧替模型发的这些上游请求同样是「这把 Key 的
+// 流量」，不带上过滤就绕过了绑定（绑定型 Key 的搜索会打到别人的号上）。
+func (h *Handler) searchAugment(ctx context.Context, chat []byte, tool serverSearchTool, filter pool.PickFilter) ([]byte, []any) {
 	var obj map[string]any
 	if err := json.Unmarshal(chat, &obj); err != nil {
 		return nil, nil
@@ -108,7 +112,7 @@ func (h *Handler) searchAugment(ctx context.Context, chat []byte, tool serverSea
 		if err != nil {
 			return nil, nil
 		}
-		msg, err := h.probeOnce(ctx, realm, bare, pb)
+		msg, err := h.probeOnce(ctx, realm, bare, pb, filter)
 		if err != nil {
 			log.Printf("WARN: [messages] web_search 探测失败，降级为普通对话: %v", err)
 			return nil, nil
@@ -123,7 +127,7 @@ func (h *Handler) searchAugment(ctx context.Context, chat []byte, tool serverSea
 				break
 			}
 			uses++
-			text, results, ok := h.searchText(ctx, realm, bare, c.Query)
+			text, results, ok := h.searchText(ctx, realm, bare, c.Query, filter)
 			if !ok {
 				// 检索失败：把失败如实告诉模型，别让它以为「网上没有」
 				text = "检索「" + c.Query + "」失败（上游检索接口不可用）。"
@@ -232,11 +236,11 @@ func anySlice(v any) []any {
 
 // probeOnce 一次非流式探测：上游只认流式，故按 SSE 聚合成整条响应后取
 // choices[0].message（与 /v1/chat/completions 的 stream:false 同径）。
-func (h *Handler) probeOnce(ctx context.Context, realm, model string, body []byte) (map[string]any, error) {
+func (h *Handler) probeOnce(ctx context.Context, realm, model string, body []byte, filter pool.PickFilter) (map[string]any, error) {
 	tried := map[string]bool{}
 	var lastErr error
 	for i := 0; i < webSearchPickTries; i++ {
-		a := h.cfg.Pool.PickExcludingForRealm(tried, model, realm)
+		a := h.cfg.Pool.PickExcludingForRealmFiltered(tried, model, realm, filter)
 		if a == nil {
 			break
 		}
@@ -278,10 +282,10 @@ func firstChoiceMessage(obj map[string]any) map[string]any {
 }
 
 // searchText 执行一次检索，返回注入用的文本与结构化结果；失败返回 false（调用方降级）。
-func (h *Handler) searchText(ctx context.Context, realm, model, query string) (string, []upstream.SearchResult, bool) {
+func (h *Handler) searchText(ctx context.Context, realm, model, query string, filter pool.PickFilter) (string, []upstream.SearchResult, bool) {
 	tried := map[string]bool{}
 	for i := 0; i < webSearchPickTries; i++ {
-		a := h.cfg.Pool.PickExcludingForRealm(tried, model, realm)
+		a := h.cfg.Pool.PickExcludingForRealmFiltered(tried, model, realm, filter)
 		if a == nil {
 			break
 		}

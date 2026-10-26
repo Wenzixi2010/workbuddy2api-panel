@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +29,7 @@ import (
 	"time"
 
 	"github.com/misakano7545/workbuddy2api-panel/internal/auth"
+	"github.com/misakano7545/workbuddy2api-panel/internal/panelauth"
 	"github.com/misakano7545/workbuddy2api-panel/internal/credithist"
 	"github.com/misakano7545/workbuddy2api-panel/internal/pool"
 	"github.com/misakano7545/workbuddy2api-panel/internal/upstream"
@@ -228,6 +230,7 @@ func upgNewEnv(t *testing.T, seeds ...upgSeed) *upgEnv {
 	e.ledger = credithist.New(e.ledgerPath, 2000)
 	e.up.SetCreditObserver(e.ledger.Observe)
 	e.panel = New(Config{
+		PanelAuth: func() (string, string) { return testUser, testPass },
 		Version:       "test",
 		APIKey:        "test-key",
 		Pool:          e.pool,
@@ -287,7 +290,7 @@ func (e *upgEnv) importCockpit(accounts []map[string]any) (int, string) {
 	}
 	req := httptest.NewRequest("POST", "/panel/api/import/cockpit", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer test-key")
+	req.AddCookie(sessionFor(e.t, e.panel))
 	rr := httptest.NewRecorder()
 	e.panel.ServeHTTP(rr, req)
 	return rr.Code, rr.Body.String()
@@ -300,7 +303,7 @@ func (e *upgEnv) importCockpit(accounts []map[string]any) (int, string) {
 func upgGet(t *testing.T, p *Panel, path string) (int, string) {
 	t.Helper()
 	req := httptest.NewRequest("GET", path, nil)
-	req.Header.Set("Authorization", "Bearer test-key")
+	req.AddCookie(sessionFor(t, p))
 	rr := httptest.NewRecorder()
 	p.ServeHTTP(rr, req)
 	return rr.Code, rr.Body.String()
@@ -309,7 +312,7 @@ func upgGet(t *testing.T, p *Panel, path string) (int, string) {
 func upgPost(t *testing.T, p *Panel, path string) (int, string) {
 	t.Helper()
 	req := httptest.NewRequest("POST", path, nil)
-	req.Header.Set("Authorization", "Bearer test-key")
+	req.AddCookie(sessionFor(t, p))
 	rr := httptest.NewRecorder()
 	p.ServeHTTP(rr, req)
 	return rr.Code, rr.Body.String()
@@ -615,7 +618,8 @@ func TestUpgRestartContinuesBaseline(t *testing.T) {
 
 	up2 := &upstream.Client{HTTP: e.fake.srv.Client(), ChatBaseCN: e.fake.srv.URL, BillingBaseCN: e.fake.srv.URL}
 	up2.SetCreditObserver(l2.Observe)
-	pn2 := New(Config{Version: "test", APIKey: "test-key", Pool: p2, Upstream: up2, CreditHistory: l2, AuthDir: e.authDir})
+	pn2 := New(Config{Version: "test", APIKey: "test-key", Pool: p2, Upstream: up2, CreditHistory: l2, AuthDir: e.authDir,
+		PanelAuth: func() (string, string) { return testUser, testPass }})
 
 	// 同值不记
 	e.fake.setPersonal("u1", 150)
@@ -820,6 +824,9 @@ func upgWriteConfig(t *testing.T, path string, port int, base, authDir, stateFil
 	cfg := map[string]any{
 		"listen":     fmt.Sprintf("127.0.0.1:%d", port),
 		"api_key":    "smoke-key",
+		// 面板登录：升级联调走真实 HTTP，必须给出账号密码，
+		// 否则面板 API 一律 401（面板鉴权已与 api_key 分家）。
+		"panel_auth": map[string]any{"username": upgUser, "password": upgPass},
 		"auth_dir":   authDir,
 		"state_file": stateFile,
 		"global": map[string]any{
@@ -843,8 +850,51 @@ func upgWriteConfig(t *testing.T, path string, port int, base, authDir, stateFil
 	}
 }
 
-func upgWaitHTTP(t *testing.T, method, url, key string, want int, timeout time.Duration) (int, string) {
+// 升级联调用的固定面板账号。
+const (
+	upgUser = "smoke-admin"
+	upgPass = "smoke-pass"
+)
+
+// upgLogin 用固定测试账号登录面板，返回会话 Cookie。
+//
+// 面板鉴权从 Bearer api_key 换成账号会话后，跨进程联调也必须真的登录一次。
+func upgLogin(t *testing.T, anyURL string) *http.Cookie {
 	t.Helper()
+	// anyURL 是面板上的任意 URL；取其 scheme+host 拼登录地址。
+	u, err := url.Parse(anyURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]string{"username": upgUser, "password": upgPass})
+	resp, err := http.Post(u.Scheme+"://"+u.Host+"/panel/api/login", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("登录失败: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("登录失败: %d %s", resp.StatusCode, b)
+	}
+	for _, c := range resp.Cookies() {
+		if c.Name == panelauth.CookieName {
+			return c
+		}
+	}
+	t.Fatal("登录成功但没有会话 Cookie")
+	return nil
+}
+
+// upgWaitHTTP 轮询 URL 直到状态码等于 want。
+//
+// 第四个参数 auth 非空表示「这是需要登录的面板 API」：会先登录拿到会话 Cookie，
+// 再带着它重试。用例意图没变（「以合法身份访问」），只是载体从 Bearer 换成了会话。
+func upgWaitHTTP(t *testing.T, method, url, auth string, want int, timeout time.Duration) (int, string) {
+	t.Helper()
+	var cookie *http.Cookie
+	if auth != "" {
+		cookie = upgLogin(t, url)
+	}
 	deadline := time.Now().Add(timeout)
 	var last string
 	for time.Now().Before(deadline) {
@@ -852,8 +902,8 @@ func upgWaitHTTP(t *testing.T, method, url, key string, want int, timeout time.D
 		if err != nil {
 			t.Fatal(err)
 		}
-		if key != "" {
-			req.Header.Set("Authorization", "Bearer "+key)
+		if cookie != nil {
+			req.AddCookie(cookie)
 		}
 		resp, err := http.DefaultClient.Do(req)
 		if err == nil {

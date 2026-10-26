@@ -2,7 +2,6 @@ package panel
 
 import (
 	"bytes"
-	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,13 +37,18 @@ func TestAppJSSyntax(t *testing.T) {
 // TestIndexHTMLNoInlineScript index.html 不得含内联 <script> 块：
 // 严格 CSP（script-src 'self'）会拦截内联脚本，页面将完全不可用。
 // 外链形式 <script src="..."> 允许。
+//
+// 断言的是源文件而不是 /panel/ 的响应体：面板现在优先输出 React 产物
+// （dist/index.html），走 HTTP 只会拿到那份构建结果，就再也测不到旧版源文件了。
+// 两条路径都要成立——dist 缺失时旧版就是兜底页面，它的 CSP 约束不能松。
 func TestIndexHTMLNoInlineScript(t *testing.T) {
-	p := newTestPanel()
-	rec := httptest.NewRecorder()
-	p.ServeHTTP(rec, httptest.NewRequest("GET", "/panel/", nil))
-	body := rec.Body.String()
+	body, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodyStr := string(body)
 
-	rest := body
+	rest := bodyStr
 	for {
 		idx := strings.Index(rest, "<script")
 		if idx < 0 {
@@ -988,10 +992,13 @@ process.stdout.write(JSON.stringify({
 }
 
 func TestLogoutWired(t *testing.T) {
-	p := newTestPanel()
-	rec := httptest.NewRecorder()
-	p.ServeHTTP(rec, httptest.NewRequest("GET", "/panel/", nil))
-	if !strings.Contains(rec.Body.String(), `id="btnLogout"`) {
+	// 读源文件而非 HTTP 响应：/panel/ 现在优先返回 React 产物，走 HTTP 拿不到旧版页面
+	// （见 TestIndexHTMLNoInlineScript 的同类说明）。
+	html, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(html), `id="btnLogout"`) {
 		t.Error(`index.html 缺少登出按钮 id="btnLogout"`)
 	}
 	js, err := os.ReadFile("app.js")
@@ -1079,10 +1086,11 @@ console.log('OK');
 // 本仓库已经犯过两次（成长任务队列整行被重复插入）。这里把它挡在 CI。
 
 func TestIndexHTMLConfigInputsUnique(t *testing.T) {
-	p := newTestPanel()
-	rec := httptest.NewRecorder()
-	p.ServeHTTP(rec, httptest.NewRequest("GET", "/panel/", nil))
-	body := rec.Body.String()
+	html, err := os.ReadFile("index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(html)
 
 	re := regexp.MustCompile(`<input[^>]*>`)
 	nameRe := regexp.MustCompile(`\sname="([^"]+)"`)

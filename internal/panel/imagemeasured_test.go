@@ -52,10 +52,10 @@ func TestPanelImageModelMeasuredCreditFallback(t *testing.T) {
 		Credit: 0.27, HasCredit: true, LatencyMs: 24000, HasLatency: true,
 	}, true)
 
-	pn := New(Config{Version: "test", APIKey: "k", Pool: p, Upstream: up, Usage: rec})
+	pn := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Version: "test", APIKey: "k", Pool: p, Upstream: up, Usage: rec})
 	rec2 := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/panel/api/models", nil)
-	req.Header.Set("Authorization", "Bearer k")
+	req.AddCookie(sessionFor(t, pn))
 	pn.ServeHTTP(rec2, req)
 	if rec2.Code != 200 {
 		t.Fatalf("code=%d body=%s", rec2.Code, rec2.Body.String())
@@ -120,9 +120,10 @@ func TestPanelImageModelCreditWithCatalogPrice(t *testing.T) {
 	rec := usage.New("")
 	rec.Add(time.Now(), "cn", "c1", "hunyuan-image-alpha", usage.Delta{Credit: 5.71, HasCredit: true}, true)
 
-	pn := New(Config{Version: "test", Pool: p, Upstream: up, Usage: rec})
+	pn := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Version: "test", Pool: p, Upstream: up, Usage: rec})
 	rec2 := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/panel/api/models", nil)
+	req.AddCookie(sessionFor(t, pn))
 	pn.ServeHTTP(rec2, req)
 	if rec2.Code != 200 {
 		t.Fatalf("code=%d body=%s", rec2.Code, rec2.Body.String())

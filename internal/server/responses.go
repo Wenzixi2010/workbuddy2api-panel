@@ -37,7 +37,7 @@ func (h *Handler) responses(w http.ResponseWriter, r *http.Request) {
 	}
 	// 声明了托管 web_search → 网关侧执行（探测→检索→结果注入，同 /v1/messages）。
 	if len(srv) > 0 {
-		if augmented, _ := h.searchAugment(r.Context(), chat, srv[0]); augmented != nil {
+		if augmented, _ := h.searchAugment(r.Context(), chat, srv[0], h.clientKeyFilter(r)); augmented != nil {
 			chat = augmented
 		}
 	}

@@ -32,7 +32,8 @@ func apiKeyPanel(t *testing.T, respBody string) (*Panel, *pool.Pool, *[]string) 
 		BillingBaseCN: "https://cn.example",
 	}
 	p := pool.New("")
-	pn := New(Config{Version: "test", Pool: p, Upstream: up, AuthDir: t.TempDir()})
+	pn := New(Config{Version: "test", Pool: p, Upstream: up, AuthDir: t.TempDir(),
+		PanelAuth: func() (string, string) { return testUser, testPass }})
 	return pn, p, &calls
 }
 
@@ -48,7 +49,9 @@ const enterpriseUsageOK = `{"code":0,"msg":"OK","data":{"credit":120,"limitNum":
 func postAPIKey(t *testing.T, pn *Panel, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	rec := httptest.NewRecorder()
-	pn.ServeHTTP(rec, httptest.NewRequest("POST", "/panel/api/accounts/add_apikey", strings.NewReader(body)))
+	req := httptest.NewRequest("POST", "/panel/api/accounts/add_apikey", strings.NewReader(body))
+	req.AddCookie(sessionFor(t, pn))
+	pn.ServeHTTP(rec, req)
 	return rec
 }
 

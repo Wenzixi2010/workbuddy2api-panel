@@ -43,6 +43,12 @@ const imageAttempts = 3
 // imagesGenerations / imagesEdits 共用实现；edit 决定上游路径与入参校验。
 func (h *Handler) images(w http.ResponseWriter, r *http.Request, edit bool) {
 	start := time.Now()
+	// 额度闸放在读 body 之前：用尽的 Key 没必要先把几 MB 的图读进内存再拒。
+	if bad, why := h.clientKeyExhausted(r); bad {
+		writeOpenAIError(w, http.StatusTooManyRequests, "client_key_quota_exceeded", why)
+		return
+	}
+	h.clientKeyQuotaHeaders(w, r)
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request", "read body: "+err.Error())
@@ -94,7 +100,9 @@ func (h *Handler) images(w http.ResponseWriter, r *http.Request, edit bool) {
 	tried := map[string]bool{}
 	var lastErr error
 	for attempt := 0; attempt < imageAttempts; attempt++ {
-		a := h.cfg.Pool.PickExcludingForRealm(tried, bare, realm)
+		// 客户 Key 的账号范围同样约束出图：绑定型 Key 只用自己绑的号，
+		// 未绑定流量避开别人独占的号（零值 = 主密钥，行为不变）。
+		a := h.cfg.Pool.PickExcludingForRealmFiltered(tried, bare, realm, h.clientKeyFilter(r))
 		if a == nil {
 			break
 		}

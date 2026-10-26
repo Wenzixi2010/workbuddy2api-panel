@@ -112,10 +112,12 @@ func TestRingPersistenceFailureStillRetainsLogs(t *testing.T) {
 	if err != nil || n == 0 || len(r.Snapshot()) != 1 || r.ArchiveError() == "" {
 		t.Fatalf("n=%d err=%v archive=%q", n, err, r.ArchiveError())
 	}
-	p := New(Config{})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, })
 	p.logs = r
 	rec := httptest.NewRecorder()
-	p.ServeHTTP(rec, httptest.NewRequest("GET", "/panel/api/logs", nil))
+	logsReq := httptest.NewRequest("GET", "/panel/api/logs", nil)
+	logsReq.AddCookie(sessionFor(t, p))
+	p.ServeHTTP(rec, logsReq)
 	var data struct {
 		ArchiveError string `json:"archive_error"`
 	}

@@ -27,8 +27,9 @@ import (
 	"github.com/misakano7545/workbuddy2api-panel/internal/auth"
 	"github.com/misakano7545/workbuddy2api-panel/internal/balance"
 	"github.com/misakano7545/workbuddy2api-panel/internal/credithist"
-	"github.com/misakano7545/workbuddy2api-panel/internal/httpauth"
+	"github.com/misakano7545/workbuddy2api-panel/internal/gatewaykey"
 	"github.com/misakano7545/workbuddy2api-panel/internal/livecfg"
+	"github.com/misakano7545/workbuddy2api-panel/internal/panelauth"
 	"github.com/misakano7545/workbuddy2api-panel/internal/pool"
 	"github.com/misakano7545/workbuddy2api-panel/internal/reqlog"
 	"github.com/misakano7545/workbuddy2api-panel/internal/scheduler"
@@ -89,6 +90,19 @@ type Config struct {
 	// 面板据它在限流提示里标注「已路由至 X」—— 否则用户看到「v4.1 限流」
 	// 会以为服务断了，实际请求已被自动改道到等价模型继续服务。
 	ModelFallback func() map[string]string
+
+	// ClientKeys 客户 API Key 存储（nil = 未启用或载入失败：Key 页签显示说明）。
+	// 面板只负责管理（签发/绑定/额度），认证在网关侧（internal/server/clientkey.go）。
+	ClientKeys *gatewaykey.Store
+	// ClientKeysEnabled 功能开关（config client_keys.enabled 的热快照）。nil = 以
+	// ClientKeys 是否非 nil 为准（测试/裸用路径）。
+	ClientKeysEnabled func() bool
+
+	// PanelAuth 返回面板登录账号密码（config panel_auth 的热快照）。nil = 回落到
+	// APIKey + 无密码，即「不启用账号登录」，与旧行为一致（测试/裸用路径）。
+	PanelAuth func() (username, password string)
+	// PanelSessionTTL 返回会话有效期；nil = 默认 12 小时。
+	PanelSessionTTL func() time.Duration
 }
 
 // Panel 管理面板 handler。挂载方式：外层 mux Handle("/panel/", panel)，
@@ -98,6 +112,10 @@ type Panel struct {
 	mux     *http.ServeMux
 	started time.Time
 	logs    *Ring
+
+	// auth 面板登录会话存储（账号密码登录，与网关 api_key 独立）。
+	// 在这里就地构造：它是无状态之外的唯一必要状态，且不依赖 main 注入。
+	auth *panelauth.Manager
 
 	// logins 进行中的 OAuth 设备授权会话（state → 会话信息）。
 	// poll 成功或超时（loginTTL）后剔除；面板常驻进程，容量天然有界。
@@ -213,6 +231,8 @@ func New(cfg Config) *Panel {
 		started: time.Now(),
 		logs:    NewRing(500),
 		logins:  map[string]loginSession{},
+		// 不能用 p.sessionTTL()：此时 p 还没构造完。直接就地解析 TTL 默认值。
+		auth: panelauth.NewManager(sessionTTLOf(cfg)),
 	}
 	p.routes()
 	return p
@@ -225,6 +245,17 @@ func (p *Panel) routes() {
 	p.mux.HandleFunc("GET /panel/{$}", p.index)
 	p.mux.HandleFunc("GET /panel/theme.js", p.themeScript)
 	p.mux.HandleFunc("GET /panel/app.js", p.appScript)
+	// 面板登录（账号密码 + 会话 Cookie）。这三个端点不加 withAuth：
+	// login 是拿到会话的入口，session 要能回答「我登录了吗」，logout 必须幂等可调
+	// （会话已过期时也要能清掉 Cookie）。
+	p.mux.HandleFunc("POST /panel/api/login", p.login)
+	p.mux.HandleFunc("POST /panel/api/logout", p.logout)
+	p.mux.HandleFunc("GET /panel/api/session", p.sessionInfo)
+	// React 产物的静态资源（Vite 构建，文件名带内容 hash）。
+	p.mux.HandleFunc("GET /panel/assets/{path...}", p.static)
+	// dist 根目录下的杂项产物（favicon.svg 等，来自 web/public/）。限定扩展名白名单，
+	// 避免把 dist/index.html 或 .map 之类从这条路径暴露出去。
+	p.mux.HandleFunc("GET /panel/favicon.svg", p.distFile("favicon.svg"))
 	p.mux.HandleFunc("GET /panel/api/overview", p.withAuth(p.overview))
 	p.mux.HandleFunc("GET /panel/api/logs", p.withAuth(p.logsHandler))
 	p.mux.HandleFunc("GET /panel/api/error_summary", p.withAuth(p.errorSummary))
@@ -275,6 +306,14 @@ func (p *Panel) routes() {
 	p.mux.HandleFunc("GET /panel/api/usage", p.withAuth(p.usage))
 	p.mux.HandleFunc("POST /panel/api/usage/save", p.withAuth(p.usageSave))
 	p.mux.HandleFunc("GET /panel/api/model_probes", p.withAuth(p.modelProbes))
+	// 客户 API Key（下游客户端用的网关 Key）：签发/绑定账号/积分额度。
+	p.mux.HandleFunc("GET /panel/api/client_keys", p.withAuth(p.clientKeys))
+	p.mux.HandleFunc("POST /panel/api/client_keys", p.withAuth(p.clientKeyCreate))
+	p.mux.HandleFunc("GET /panel/api/client_keys/bindable", p.withAuth(p.clientKeyBindableAccounts))
+	p.mux.HandleFunc("POST /panel/api/client_keys/{id}", p.withAuth(p.clientKeyUpdate))
+	p.mux.HandleFunc("POST /panel/api/client_keys/{id}/delete", p.withAuth(p.clientKeyDelete))
+	p.mux.HandleFunc("POST /panel/api/client_keys/{id}/rotate", p.withAuth(p.clientKeyRotate))
+	p.mux.HandleFunc("POST /panel/api/client_keys/{id}/reset_usage", p.withAuth(p.clientKeyResetUsage))
 	p.mux.HandleFunc("GET /panel/api/config", p.withAuth(p.getConfig))
 	p.mux.HandleFunc("POST /panel/api/config", p.withAuth(p.saveConfig))
 	p.mux.HandleFunc("GET /panel/api/update", p.withAuth(p.updateStatus))
@@ -289,20 +328,10 @@ func (p *Panel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.mux.ServeHTTP(w, r)
 }
 
-// withAuth 与 server 包同口径的 Bearer 鉴权（经 httpauth 常量时间比较）；
-// api_key 为空时放行。密钥经 livecfg 快照读取：面板里改了 api_key，下一个请求
-// 即用新值（无需重启）。
-func (p *Panel) withAuth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !httpauth.VerifyBearer(r, p.apiKey()) {
-			writeErr(w, http.StatusUnauthorized, "invalid_api_key")
-			return
-		}
-		next(w, r)
-	}
-}
-
-// apiKey 当前生效密钥（Live 优先，回落静态字段）。
+// apiKey 当前生效的**网关**密钥（Live 优先，回落静态字段）。
+//
+// 注意：面板自身鉴权已经不用它了（见 panelauth.go 的 withAuth）。保留这个访问器
+// 是因为配置页要能展示/编辑 api_key，且它仍是 /v1/* 的唯一凭证。
 func (p *Panel) apiKey() string {
 	if p.cfg.Live != nil {
 		return p.cfg.Live.Load().APIKey
@@ -349,7 +378,9 @@ func (p *Panel) overview(w http.ResponseWriter, r *http.Request) {
 		"poll_interval_sec": p.cfg.PollIntervalSec,
 		"update":            p.updateSnapshot(),
 		"uptime_sec":        int(time.Since(p.started).Seconds()),
-		"auth_required":     p.apiKey() != "",
+		// 面板是否需要登录（账号密码）。与网关 api_key 无关：这里回答的是
+		// 「打开面板要不要输账号」，不是「调 /v1 要不要 api_key」。
+		"auth_required": p.authRequired(),
 		"redis_mode":        p.cfg.RedisMode,
 		"sticky_sessions":   sticky,
 		"total":             total,

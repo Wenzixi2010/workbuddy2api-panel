@@ -74,7 +74,7 @@ func newAutoTaskTestPanel(t *testing.T, current, target int64, acceptStatus stri
 	client := upstream.New()
 	client.HTTP = &http.Client{Timeout: 2 * time.Second}
 	client.ChatBaseCN, client.WebBaseCN, client.BillingBaseCN = server.URL, server.URL, server.URL
-	p := New(Config{Upstream: client})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Upstream: client})
 	a := &auth.Auth{UID: "autotask-test", AccessToken: "token"}
 	return p, a, state
 }
@@ -234,7 +234,7 @@ func TestAutoTaskGlobalWriteEntryPointsDoNotCallUpstream(t *testing.T) {
 	client := upstream.New()
 	client.HTTP = &http.Client{Timeout: time.Second}
 	client.ChatBaseCN, client.WebBaseCN, client.BillingBaseCN = server.URL, server.URL, server.URL
-	p := New(Config{Pool: accounts, Upstream: client})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Pool: accounts, Upstream: client})
 
 	for _, handler := range []http.HandlerFunc{p.accountTaskAuto, p.accountTaskAutoAll} {
 		r := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"task_code":"chat_5"}`))

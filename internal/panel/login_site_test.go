@@ -57,7 +57,7 @@ func TestLoginStartRecordsSiteAndDecoratesURL(t *testing.T) {
 
 	withTestSite(t, srv.URL, loginsite.SiteIntl)
 
-	p := New(Config{})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, })
 	rec := httptest.NewRecorder()
 	p.loginStart(rec, httptest.NewRequest("POST", "/panel/api/login/start",
 		strings.NewReader(`{"site":"intl"}`)))
@@ -112,7 +112,7 @@ func TestLoginStartLegacyRealm(t *testing.T) {
 
 	withTestSite(t, srv.URL, loginsite.SiteWorkBuddy)
 
-	p := New(Config{})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, })
 	rec := httptest.NewRecorder()
 	p.loginStart(rec, httptest.NewRequest("POST", "/panel/api/login/start",
 		strings.NewReader(`{"realm":"global"}`)))
@@ -140,7 +140,7 @@ func TestLoginPollFatalLicenseCode(t *testing.T) {
 
 	withTestSite(t, srv.URL, loginsite.SiteCN)
 
-	p := New(Config{})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, })
 	p.logins = map[string]loginSession{"st1": {created: time.Now(), realm: "cn", site: "cn"}}
 	rec := httptest.NewRecorder()
 	p.loginPoll(rec, httptest.NewRequest("GET", "/panel/api/login/poll?state=st1", nil))
@@ -180,7 +180,7 @@ func TestLoginPollPendingCodeKeepsPolling(t *testing.T) {
 
 	withTestSite(t, srv.URL, loginsite.SiteCN)
 
-	p := New(Config{})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, })
 	p.logins = map[string]loginSession{"st2": {created: time.Now(), realm: "cn", site: "cn"}}
 	rec := httptest.NewRecorder()
 	p.loginPoll(rec, httptest.NewRequest("GET", "/panel/api/login/poll?state=st2", nil))
@@ -214,7 +214,7 @@ func TestLogPollOnceDedupes(t *testing.T) {
 	log.SetOutput(&buf)
 	t.Cleanup(func() { log.SetOutput(orig) })
 
-	p := New(Config{})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, })
 	p.logins = map[string]loginSession{"st-abcdef12": {created: time.Now(), realm: "cn", site: "cn"}}
 
 	lines := func() int { return strings.Count(buf.String(), "登录轮询") }

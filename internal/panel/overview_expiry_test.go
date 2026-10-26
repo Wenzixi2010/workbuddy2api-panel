@@ -24,10 +24,12 @@ func TestOverviewIncludesExpiryBuckets(t *testing.T) {
 			{Date: at.Format("2006-01-02"), ExpireAt: at, Remain: 40},
 		},
 	})
-	pn := New(Config{Version: "test", Pool: p})
+	pn := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Version: "test", Pool: p})
 
 	rec := httptest.NewRecorder()
-	pn.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/panel/api/overview", nil))
+	ovReq := httptest.NewRequest(http.MethodGet, "/panel/api/overview", nil)
+	ovReq.AddCookie(sessionFor(t, pn))
+	pn.ServeHTTP(rec, ovReq)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("overview code=%d body=%s", rec.Code, rec.Body)
 	}

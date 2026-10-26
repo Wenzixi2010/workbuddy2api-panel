@@ -19,11 +19,13 @@ import (
 func TestAccountPauseAndResumeWireToPool(t *testing.T) {
 	p := pool.New("")
 	p.Add(&auth.Auth{UID: "u1", Nickname: "A", AccessToken: "at1"})
-	pn := New(Config{Version: "test", Pool: p})
+	pn := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Version: "test", Pool: p})
 
 	call := func(path string) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()
-		pn.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, nil))
+		req := httptest.NewRequest(http.MethodPost, path, nil)
+		req.AddCookie(sessionFor(t, pn))
+		pn.ServeHTTP(rec, req)
 		return rec
 	}
 	if rec := call("/panel/api/accounts/u1/pause"); rec.Code != http.StatusOK {
@@ -65,10 +67,12 @@ func TestOverviewExposesPausedFlag(t *testing.T) {
 	p := pool.New("")
 	p.Add(&auth.Auth{UID: "u1", Nickname: "A", AccessToken: "at1"})
 	p.Pause("u1")
-	pn := New(Config{Version: "test", Pool: p})
+	pn := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Version: "test", Pool: p})
 
 	rec := httptest.NewRecorder()
-	pn.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/panel/api/overview", nil))
+	ovReq := httptest.NewRequest(http.MethodGet, "/panel/api/overview", nil)
+	ovReq.AddCookie(sessionFor(t, pn))
+	pn.ServeHTTP(rec, ovReq)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("overview code=%d", rec.Code)
 	}
@@ -209,11 +213,13 @@ func TestOverviewExposesModelLocks(t *testing.T) {
 	p := pool.New("")
 	p.Add(&auth.Auth{UID: "u1", Nickname: "A", AccessToken: "at1"})
 	p.Add(&auth.Auth{UID: "u2", Nickname: "B", AccessToken: "at2"})
-	pn := New(Config{Version: "test", Pool: p})
+	pn := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Version: "test", Pool: p})
 
 	read := func() []map[string]any {
 		rec := httptest.NewRecorder()
-		pn.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/panel/api/overview", nil))
+		ovReq := httptest.NewRequest(http.MethodGet, "/panel/api/overview", nil)
+		ovReq.AddCookie(sessionFor(t, pn))
+		pn.ServeHTTP(rec, ovReq)
 		if rec.Code != 200 {
 			t.Fatalf("overview code=%d", rec.Code)
 		}

@@ -13,8 +13,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-
-	"github.com/misakano7545/workbuddy2api-panel/internal/httpauth"
 )
 
 func (h *Handler) withAnthropicAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -25,11 +23,14 @@ func (h *Handler) withAnthropicAuth(next http.HandlerFunc) http.HandlerFunc {
 				r.Header.Set("Authorization", "Bearer "+k)
 			}
 		}
-		if !httpauth.VerifyBearer(r, h.loadLive().APIKey) {
-			writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "missing or invalid API key")
+		// 主密钥与客户 Key 同一口径（clientkey.go）：Anthropic 客户端用客户 Key 时
+		// 同样要走绑定与额度，否则「OpenAI 侧限额、Anthropic 侧无限」是同一个洞。
+		r2, why := h.authorizedClient(r)
+		if why != "" {
+			writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", why)
 			return
 		}
-		next(w, r)
+		next(w, r2)
 	}
 }
 
@@ -51,15 +52,16 @@ func (h *Handler) withDualAuth(next http.HandlerFunc) http.HandlerFunc {
 				r.Header.Set("Authorization", "Bearer "+k)
 			}
 		}
-		if !httpauth.VerifyBearer(r, h.loadLive().APIKey) {
+		r2, why := h.authorizedClient(r)
+		if why != "" {
 			if r.Header.Get("x-api-key") != "" || r.Header.Get("anthropic-version") != "" {
-				writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", "missing or invalid API key")
+				writeAnthropicError(w, http.StatusUnauthorized, "authentication_error", why)
 				return
 			}
-			writeOpenAIError(w, http.StatusUnauthorized, "invalid_api_key", "missing or invalid API key")
+			writeOpenAIError(w, http.StatusUnauthorized, "invalid_api_key", why)
 			return
 		}
-		next(w, r)
+		next(w, r2)
 	}
 }
 
@@ -78,10 +80,18 @@ func (h *Handler) messages(w http.ResponseWriter, r *http.Request) {
 	// 注入失败不改语义：searchAugment 返回 nil body 时按普通对话继续。
 	var prelude []any
 	if len(srv) > 0 {
-		if augmented, blocks := h.searchAugment(r.Context(), chat, srv[0]); augmented != nil {
+		if augmented, blocks := h.searchAugment(r.Context(), chat, srv[0], h.clientKeyFilter(r)); augmented != nil {
 			chat, prelude = augmented, blocks
 		}
 	}
+	// 额度闸在转译之后、进 chat 之前：/v1/messages 最终会落到 chatCompletions，
+	// 那里也有一道闸，但在这里提前拦住能省掉一次 body 重组 + 上游选号；错误形状
+	// 也按 Anthropic 口径回（chat 侧只会回 OpenAI 形状，Anthropic SDK 解析不了 429）。
+	if bad, why := h.clientKeyExhausted(r); bad {
+		writeAnthropicError(w, http.StatusTooManyRequests, "rate_limit_error", why)
+		return
+	}
+	h.clientKeyQuotaHeaders(w, r)
 	var peek struct {
 		Stream bool `json:"stream"`
 	}

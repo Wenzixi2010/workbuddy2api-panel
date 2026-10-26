@@ -29,7 +29,7 @@ func TestBatchEndpointsRejectConcurrentRuns(t *testing.T) {
 	} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("POST", path, nil)
-		req.Header.Set("Authorization", "Bearer test-key")
+		req.AddCookie(sessionFor(t, p))
 		p.ServeHTTP(rec, req)
 		if rec.Code != http.StatusConflict {
 			t.Errorf("%s: got %d want 409 (body=%s)", path, rec.Code, rec.Body.String())
@@ -39,7 +39,7 @@ func TestBatchEndpointsRejectConcurrentRuns(t *testing.T) {
 	p.batchRunning.Store(false)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/panel/api/checkin_all", nil)
-	req.Header.Set("Authorization", "Bearer test-key")
+	req.AddCookie(sessionFor(t, p))
 	p.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotImplemented {
 		t.Errorf("闸门释放后应回到 501 语义, got %d", rec.Code)
@@ -78,12 +78,12 @@ func fakeModelsPool() *pool.Pool {
 // 打上游（cached=true），refresh=1 绕过缓存并刷新它，TTL 过期后重新聚合。
 func TestModelsCacheShortTTL(t *testing.T) {
 	var calls atomic.Int32
-	pn := New(Config{Version: "test", APIKey: "k", Pool: fakeModelsPool(), Upstream: fakeModelsUpstream(&calls)})
+	pn := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Version: "test", APIKey: "k", Pool: fakeModelsPool(), Upstream: fakeModelsUpstream(&calls)})
 
 	get := func(query string) (int, bool) {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest("GET", "/panel/api/models"+query, nil)
-		req.Header.Set("Authorization", "Bearer k")
+		req.AddCookie(sessionFor(t, pn))
 		pn.ServeHTTP(rec, req)
 		var resp struct {
 			Cached bool             `json:"cached"`

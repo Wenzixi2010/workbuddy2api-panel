@@ -12,10 +12,10 @@ import (
 // 环境变量托管」，供前端禁用输入框 + 不把无效值写进本地会话密钥。移植上游 PR #104。
 func TestConfigAPIReportsEnvironmentManagedKey(t *testing.T) {
 	t.Setenv("WB2A_API_KEY", "environment-key")
-	p := New(Config{APIKey: "environment-key", LoadConfig: func() (any, error) { return map[string]any{"api_key": "environment-key"}, nil }, SaveConfig: func([]byte) ([]string, error) { return nil, nil }})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, APIKey: "environment-key", LoadConfig: func() (any, error) { return map[string]any{"api_key": "environment-key"}, nil }, SaveConfig: func([]byte) ([]string, error) { return nil, nil }})
 	for _, method := range []string{http.MethodGet, http.MethodPost} {
 		req := httptest.NewRequest(method, "/panel/api/config", strings.NewReader(`{"api_key":"other"}`))
-		req.Header.Set("Authorization", "Bearer environment-key")
+		req.AddCookie(sessionFor(t, p))
 		rec := httptest.NewRecorder()
 		p.ServeHTTP(rec, req)
 		var response map[string]any

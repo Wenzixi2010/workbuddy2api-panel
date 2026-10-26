@@ -9,9 +9,19 @@ import (
 	"testing"
 )
 
+// newTestPanel 测试面板：**启用账号密码登录**，未登录的请求一律 401。
+//
+// 注意这里不再配 APIKey 来「启用鉴权」——面板鉴权已与网关 api_key 分家，
+// 配了账号密码才需要登录。APIKey 仍然填着，是为了让想验证「api_key 进不了面板」
+// 的用例（TestGatewayAPIKeyNoLongerOpensPanel）有个真实值可比。
 func newTestPanel() *Panel {
-	// 启用鉴权：未带 key 的请求一律 401，不进入依赖 Pool/Upstream 的 handler。
-	return New(Config{Version: "test", APIKey: "test-key"})
+	return New(Config{
+		Version: "test",
+		APIKey:  "test-key",
+		PanelAuth: func() (string, string) {
+			return testUser, testPass
+		},
+	})
 }
 
 // 面板安全响应头必须覆盖：页面、静态脚本、鉴权失败响应。
@@ -67,11 +77,11 @@ func TestCSPDisallowsInlineScriptAndFraming(t *testing.T) {
 }
 
 // 页面必须引用外部脚本（内联脚本会被上面的 CSP 拦掉，页面将完全不可用）。
+//
+// 这里断言的是**旧版回退页**（legacyIndex）：/panel/ 现在优先输出 React 产物，
+// 只有在 dist 缺失时才回落到它。回退路径同样要满足 CSP，所以照旧钉住。
 func TestIndexReferencesExternalScript(t *testing.T) {
-	p := newTestPanel()
-	rec := httptest.NewRecorder()
-	p.ServeHTTP(rec, httptest.NewRequest("GET", "/panel/", nil))
-	body := rec.Body.String()
+	body := string(legacyIndex)
 
 	if !strings.Contains(body, `<script src="app.js?v=`) {
 		t.Error("index.html must load app.js externally with content fingerprint (inline script is blocked by CSP)")
@@ -105,24 +115,16 @@ func TestAppScriptServed(t *testing.T) {
 // 钉的是：URL 查询串里的 v= 就是所服务脚本的 sha256 前 8 字节——指纹算错/
 // 接错内容等于没防，这条断言把它钉死。
 func TestScriptURLsCarryContentFingerprint(t *testing.T) {
-	p := newTestPanel()
-
-	page := httptest.NewRecorder()
-	p.ServeHTTP(page, httptest.NewRequest("GET", "/panel/", nil))
-	body := page.Body.String()
-
-	appRec := httptest.NewRecorder()
-	p.ServeHTTP(appRec, httptest.NewRequest("GET", "/panel/app.js", nil))
-	themeRec := httptest.NewRecorder()
-	p.ServeHTTP(themeRec, httptest.NewRequest("GET", "/panel/theme.js", nil))
+	// 指纹是给旧版回退页用的（React 版由 Vite 在文件名里写 hash）。
+	body := string(legacyIndex)
 
 	for _, c := range []struct {
 		name string
 		src  string
 		data string
 	}{
-		{"app.js", `src="app.js?v=`, appRec.Body.String()},
-		{"theme.js", `src="theme.js?v=`, themeRec.Body.String()},
+		{"app.js", `src="app.js?v=`, string(appJS)},
+		{"theme.js", `src="theme.js?v=`, string(themeJS)},
 	} {
 		i := strings.Index(body, c.src)
 		if i < 0 {
@@ -160,9 +162,8 @@ func TestThemeBootScriptRunsBeforeStyles(t *testing.T) {
 		t.Error("theme.js 未读取 wb2api.theme，与 app.js 的存储键对不上")
 	}
 
-	page := httptest.NewRecorder()
-	p.ServeHTTP(page, httptest.NewRequest("GET", "/panel/", nil))
-	body := page.Body.String()
+	// 旧版回退页：theme.js 必须排在它自己的内联 <style> 之前。
+	body := string(legacyIndex)
 	iScript := strings.Index(body, `<script src="theme.js?v=`)
 	if iScript < 0 {
 		t.Fatal("index.html 未引用 theme.js")
@@ -170,6 +171,28 @@ func TestThemeBootScriptRunsBeforeStyles(t *testing.T) {
 	iStyle := strings.Index(body, "<style>")
 	if iStyle < 0 || iScript > iStyle {
 		t.Errorf("theme.js 必须早于 <style> 加载: script@%d style@%d", iScript, iStyle)
+	}
+}
+
+// TestReactIndexBootsThemeFirst React 版入口页同样要先跑 theme.js 再加载样式。
+//
+// 与旧版不同的是：React 版的样式是 Vite 注入的 <link rel=stylesheet>，首帧由它决定，
+// 所以 theme.js 必须排在**那一行之前**。这条只在有产物时生效。
+func TestReactIndexBootsThemeFirst(t *testing.T) {
+	if !hasDist() {
+		t.Skip("未构建 React 产物，跳过")
+	}
+	body := string(distIndex)
+	iScript := strings.Index(body, "/panel/theme.js")
+	if iScript < 0 {
+		t.Fatal("React 入口页未引用 /panel/theme.js：首屏会先按深色画一帧再翻主题")
+	}
+	iCSS := strings.Index(body, "rel=\"stylesheet\"")
+	if iCSS < 0 {
+		t.Fatal("React 入口页没有样式表引用，产物可能不完整")
+	}
+	if iScript > iCSS {
+		t.Errorf("theme.js 必须早于样式表: script@%d css@%d", iScript, iCSS)
 	}
 }
 
@@ -205,20 +228,20 @@ func TestValidUID(t *testing.T) {
 	}
 }
 
-// 未带密钥的 API 请求必须 401；携带正确密钥则通过鉴权层（不再是 401）。
+// 未登录的 API 请求必须 401；带会话则通过鉴权层（不再是 401）。
 func TestAuthLayerBehavior(t *testing.T) {
 	p := newTestPanel()
 	rec := httptest.NewRecorder()
 	p.ServeHTTP(rec, httptest.NewRequest("GET", "/panel/api/overview", nil))
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("no key: code=%d want 401", rec.Code)
+		t.Fatalf("未登录: code=%d want 401", rec.Code)
 	}
-	// 用不存在的路由验证"带正确 key 已过鉴权"（避免触碰依赖 nil 的 handler）。
+	// 用不存在的路由验证「带会话已过鉴权」（避免触碰依赖 nil 的 handler）。
 	rec2 := httptest.NewRecorder()
 	req2 := httptest.NewRequest("GET", "/panel/api/nonexistent", nil)
-	req2.Header.Set("Authorization", "Bearer test-key")
+	req2.AddCookie(sessionFor(t, p))
 	p.ServeHTTP(rec2, req2)
 	if rec2.Code == http.StatusUnauthorized {
-		t.Error("valid key must pass the auth layer")
+		t.Error("带合法会话必须通过鉴权层")
 	}
 }

@@ -146,7 +146,7 @@ func sweepPanel(t *testing.T, f *sweepFake, accounts ...*auth.Auth) *Panel {
 	for _, a := range accounts {
 		p.Add(a)
 	}
-	return New(Config{Pool: p, Upstream: up})
+	return New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Pool: p, Upstream: up})
 }
 
 // 待接受的任务被接受、达标未领的被领（默认口径与 mp 口径分开提交；mp 专属码走 mp 头）。
@@ -228,7 +228,7 @@ func TestTaskSweepSkipsGatedAccounts(t *testing.T) {
 	srv := httptest.NewServer(f.handler(t))
 	defer srv.Close()
 	up := &upstream.Client{HTTP: srv.Client(), ChatBaseCN: srv.URL, BillingBaseCN: srv.URL, WebBaseCN: srv.URL}
-	pn := New(Config{Pool: p, Upstream: up})
+	pn := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Pool: p, Upstream: up})
 
 	swept, _ := pn.RunTaskSweepNow()
 	if swept != 0 {

@@ -21,11 +21,13 @@ func TestUpdateAPIRequiresAuthentication(t *testing.T) {
 		p := newTestPanel()
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(endpoint.method, endpoint.path, nil)
+		// 未登录必须 401
 		p.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("%s: got %d", endpoint.path, rec.Code)
 		}
-		req.Header.Set("Authorization", "Bearer test-key")
+		// 登录后放行（未配置 Updater → 501）
+		req.AddCookie(sessionFor(t, p))
 		rec = httptest.NewRecorder()
 		p.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotImplemented {
@@ -35,9 +37,9 @@ func TestUpdateAPIRequiresAuthentication(t *testing.T) {
 }
 
 func TestUpdateStatusAndUnsupportedInstall(t *testing.T) {
-	p := New(Config{APIKey: "test-key", Updater: updater.New("dev", "", "", updater.Settings{AutoEnabled: true, AutoTime: "06:30"})})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, APIKey: "test-key", Updater: updater.New("dev", "", "", updater.Settings{AutoEnabled: true, AutoTime: "06:30"})})
 	req := httptest.NewRequest(http.MethodGet, "/panel/api/update", nil)
-	req.Header.Set("Authorization", "Bearer test-key")
+	req.AddCookie(sessionFor(t, p))
 	rec := httptest.NewRecorder()
 	p.ServeHTTP(rec, req)
 	var status updater.Status
@@ -48,7 +50,7 @@ func TestUpdateStatusAndUnsupportedInstall(t *testing.T) {
 		t.Fatalf("unexpected status: %d %+v", rec.Code, status)
 	}
 	req = httptest.NewRequest(http.MethodPost, "/panel/api/update/install", nil)
-	req.Header.Set("Authorization", "Bearer test-key")
+	req.AddCookie(sessionFor(t, p))
 	rec = httptest.NewRecorder()
 	p.ServeHTTP(rec, req)
 	if rec.Code != http.StatusBadGateway || p.cfg.Updater.Status().Installing {

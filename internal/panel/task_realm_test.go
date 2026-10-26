@@ -24,7 +24,7 @@ func useRealmForTest(t *testing.T) {
 func panelWithTestAccount(a *auth.Auth, up *upstream.Client) *Panel {
 	p := pool.New("")
 	p.Add(a)
-	return New(Config{Pool: p, Upstream: up})
+	return New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Pool: p, Upstream: up})
 }
 
 func testRealmAuth(t *testing.T, uid, realm string) *auth.Auth {
@@ -53,6 +53,7 @@ func TestGlobalTaskReadReturnsCapabilitiesAndNormalizedIDs(t *testing.T) {
 	p := panelWithTestAccount(testRealmAuth(t, "global-1", "global"), up)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/panel/api/accounts/global-1/tasks", nil)
+	req.AddCookie(sessionFor(t, p))
 	p.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
@@ -116,6 +117,7 @@ func TestGlobalTaskWriteEndpointsDoNotCallUpstream(t *testing.T) {
 	} {
 		rec := httptest.NewRecorder()
 		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+		req.AddCookie(sessionFor(t, p))
 		p.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotImplemented {
 			t.Errorf("%s status=%d body=%s, want 501", tc.path, rec.Code, rec.Body.String())
@@ -149,7 +151,9 @@ func TestGlobalCheckinIsSkippedWithoutUpstreamRequest(t *testing.T) {
 	up.HTTP, up.BillingBaseGlobal = srv.Client(), srv.URL
 	p := panelWithTestAccount(testRealmAuth(t, "global-1", "global"), up)
 	rec := httptest.NewRecorder()
-	p.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/panel/api/accounts/global-1/checkin", nil))
+	reqS := httptest.NewRequest(http.MethodPost, "/panel/api/accounts/global-1/checkin", nil)
+	reqS.AddCookie(sessionFor(t, p))
+	p.ServeHTTP(rec, reqS)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -187,19 +191,23 @@ func TestAccountTravelRequiresSchedulerAndKnownUID(t *testing.T) {
 	pool.Add(testRealmAuth(t, "cn-1", "cn"))
 
 	// 无调度器 → 501
-	noSched := New(Config{Pool: pool, Upstream: up})
+	noSched := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Pool: pool, Upstream: up})
 	rec := httptest.NewRecorder()
-	noSched.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/panel/api/accounts/cn-1/travel", nil))
+	reqS := httptest.NewRequest(http.MethodPost, "/panel/api/accounts/cn-1/travel", nil)
+	reqS.AddCookie(sessionFor(t, noSched))
+	noSched.ServeHTTP(rec, reqS)
 	if rec.Code != http.StatusNotImplemented {
 		t.Fatalf("no scheduler status=%d want 501", rec.Code)
 	}
 
 	// 有调度器：未知 uid → 404
-	p := New(Config{Pool: pool, Upstream: up, Scheduler: scheduler.New(scheduler.Config{
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Pool: pool, Upstream: up, Scheduler: scheduler.New(scheduler.Config{
 		Pool: pool, Upstream: up,
 	})})
 	rec = httptest.NewRecorder()
-	p.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/panel/api/accounts/nobody/travel", nil))
+	reqS2 := httptest.NewRequest(http.MethodPost, "/panel/api/accounts/nobody/travel", nil)
+	reqS2.AddCookie(sessionFor(t, p))
+	p.ServeHTTP(rec, reqS2)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown uid status=%d want 404 body=%s", rec.Code, rec.Body.String())
 	}
@@ -227,9 +235,11 @@ func TestCNCheckinFailureStillRefreshesBalanceAndReportsFailure(t *testing.T) {
 	up.HTTP, up.BillingBaseCN = srv.Client(), srv.URL
 	pool := pool.New("")
 	pool.Add(testRealmAuth(t, "cn-1", "cn"))
-	p := New(Config{Pool: pool, Upstream: up})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Pool: pool, Upstream: up})
 	rec := httptest.NewRecorder()
-	p.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/panel/api/accounts/cn-1/checkin", nil))
+	reqS := httptest.NewRequest(http.MethodPost, "/panel/api/accounts/cn-1/checkin", nil)
+	reqS.AddCookie(sessionFor(t, p))
+	p.ServeHTTP(rec, reqS)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
@@ -266,7 +276,7 @@ func TestTaskScanAndQueueExposeSkippedAccountsAndScanErrors(t *testing.T) {
 	accounts := pool.New("")
 	accounts.Add(testRealmAuth(t, "cn-1", "cn"))
 	accounts.Add(testRealmAuth(t, "global-1", "global"))
-	p := New(Config{Pool: accounts, Upstream: up})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Pool: accounts, Upstream: up})
 
 	for _, tc := range []struct {
 		path string
@@ -276,7 +286,9 @@ func TestTaskScanAndQueueExposeSkippedAccountsAndScanErrors(t *testing.T) {
 		{"/panel/api/tasks/run_queue", `{"growth":true,"concurrency":1}`},
 	} {
 		rec := httptest.NewRecorder()
-		p.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body)))
+		reqS := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+		reqS.AddCookie(sessionFor(t, p))
+		p.ServeHTTP(rec, reqS)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s status=%d body=%s", tc.path, rec.Code, rec.Body.String())
 		}

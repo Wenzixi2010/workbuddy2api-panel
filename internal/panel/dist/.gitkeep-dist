@@ -1,0 +1,4 @@
+This file exists so that Vite's build output directory is never empty:
+internal/panel/dist/.gitkeep is removed by emptyOutDir on every build,
+and `go:embed all:dist` fails to compile when the directory has no files.
+Keep this file; it is copied verbatim into the dist directory.

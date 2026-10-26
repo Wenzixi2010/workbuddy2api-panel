@@ -184,7 +184,7 @@ func TestAggregateErrorsResetUntil(t *testing.T) {
 
 // 端点契约：前端读的是 {rows, scanned, updated_at}（renderErrorSummary 直接取这三项）。
 func TestErrorSummaryEndpoint(t *testing.T) {
-	p := New(Config{})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, })
 	p.Logs().Write([]byte("WARN: [upstream] chat_stream acct=a1b2c3d4: upstream 429 soft_rate body={\"code\":6004}\n"))
 	rec := httptest.NewRecorder()
 	p.errorSummary(rec, httptest.NewRequest("GET", "/panel/api/error_summary", nil))

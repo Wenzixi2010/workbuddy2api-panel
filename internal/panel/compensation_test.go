@@ -59,14 +59,14 @@ func newCompPanel(t *testing.T, uid ...string) *compPanel {
 	}
 	up := &upstream.Client{HTTP: srv.Client(), ChatBaseCN: srv.URL, BillingBaseCN: srv.URL, WebBaseCN: srv.URL}
 	sch := scheduler.New(scheduler.Config{Pool: p, Upstream: up})
-	c.panel = New(Config{Version: "test", APIKey: "test-key", Pool: p, Upstream: up, Scheduler: sch})
+	c.panel = New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Version: "test", APIKey: "test-key", Pool: p, Upstream: up, Scheduler: sch})
 	return c
 }
 
 func (c *compPanel) do(t *testing.T, method, path string) (int, map[string]any) {
 	t.Helper()
 	req := httptest.NewRequest(method, path, nil)
-	req.Header.Set("Authorization", "Bearer test-key")
+	req.AddCookie(sessionFor(t, c.panel))
 	rr := httptest.NewRecorder()
 	c.panel.ServeHTTP(rr, req)
 	out := map[string]any{}
@@ -156,14 +156,14 @@ func TestPanelCompensationUnknownUID404(t *testing.T) {
 
 // TestPanelCompensationWithoutScheduler501 无调度器（未接入）时三个入口一律 501。
 func TestPanelCompensationWithoutScheduler501(t *testing.T) {
-	p := New(Config{Version: "test", APIKey: "test-key", Pool: pool.New(""), Upstream: &upstream.Client{}})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Version: "test", APIKey: "test-key", Pool: pool.New(""), Upstream: &upstream.Client{}})
 	for _, c := range []struct{ method, path string }{
 		{"GET", "/panel/api/compensation"},
 		{"POST", "/panel/api/accounts/u1/compensation"},
 		{"POST", "/panel/api/compensation_all"},
 	} {
 		req := httptest.NewRequest(c.method, c.path, nil)
-		req.Header.Set("Authorization", "Bearer test-key")
+		req.AddCookie(sessionFor(t, p))
 		rr := httptest.NewRecorder()
 		p.ServeHTTP(rr, req)
 		if rr.Code != http.StatusNotImplemented {

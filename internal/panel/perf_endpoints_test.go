@@ -19,7 +19,7 @@ import (
 // 这正是前端用「已见到的最大 ts + 同一批兜底」策略的原因（见 app.js 的 logSinceTs）。
 // 本测试用「分批写入 + 显式 sleep」构造可区分的时间戳。
 func TestLogsHandlerSinceIncremental(t *testing.T) {
-	p := New(Config{Version: "test", APIKey: "test-key"})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Version: "test", APIKey: "test-key"})
 
 	// 第一批：2 行。
 	p.logs.Write([]byte("2026/10/24 12:00:00 line-0\n2026/10/24 12:00:01 line-1\n"))
@@ -38,7 +38,7 @@ func TestLogsHandlerSinceIncremental(t *testing.T) {
 			u += "?since=" + since
 		}
 		req := httptest.NewRequest(http.MethodGet, u, nil)
-		req.Header.Set("Authorization", "Bearer test-key")
+		req.AddCookie(sessionFor(t, p))
 		rec := httptest.NewRecorder()
 		p.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK {
@@ -120,14 +120,14 @@ func TestParseSinceParamPlusDecodedAsSpace(t *testing.T) {
 // recent 数组（只回指标与归档状态）。面板在归档开启时用归档数据当请求记录表，
 // recent 那 100 条（~35KB）用不上——每 5 秒白拉一次、白解析、白 GC。
 func TestRequestMetricsRecentOptOut(t *testing.T) {
-	p := New(Config{Version: "test", APIKey: "test-key"})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Version: "test", APIKey: "test-key"})
 
 	// RequestLog 为 nil 时端点返回 501——本测试验证各参数组合都不会 500，
 	// 且参数解析不因取值不同而改变响应码。真正的「有没有 recent」由 reqlog 层的
 	// Snapshot 裁剪（服务端在 recent=0 时把 Recent 置 nil）。
 	for _, q := range []string{"", "?recent=0", "?recent=false", "?recent=1"} {
 		req := httptest.NewRequest(http.MethodGet, "/panel/api/request_metrics"+q, nil)
-		req.Header.Set("Authorization", "Bearer test-key")
+		req.AddCookie(sessionFor(t, p))
 		rec := httptest.NewRecorder()
 		p.ServeHTTP(rec, req)
 		if rec.Code != http.StatusNotImplemented {

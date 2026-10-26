@@ -449,7 +449,7 @@ $('btnLogout').onclick = () => {
 };
 
 /* ── 路由 ─────────────────────────────────────────────────────────── */
-const TITLES = { accounts: '账号池', usage: '用量', packages: '积分构成', balhist: '余额趋势', taskscenter: '任务中心', models: '模型与档位', config: '配置', events: '请求事件日志', logs: '运行日志' };
+const TITLES = { accounts: '账号池', usage: '用量', packages: '积分构成', balhist: '余额趋势', taskscenter: '任务中心', models: '模型与档位', keys: 'API Keys', config: '配置', events: '请求事件日志', logs: '运行日志' };
 function go(v) {
   navSet(false);
   view = v;
@@ -464,6 +464,9 @@ function go(v) {
   if (v === 'events') loadEvents();
   if (v === 'logs') { if (!logRows.length) resetLogWindow(); loadLogs(); }
   if (v === 'usage') loadUsage();
+  // API Keys 每次进入都拉一次：签发/绑定/额度是低频人工操作，缓存只会让
+  // 「刚在另一台机器上改过的绑定」显示成旧的。
+  if (v === 'keys') loadClientKeys();
   if (v === 'packages') loadPackages();
   if (v === 'balhist') loadBalance();
   // 补偿状态按需拉取：compData 为空才打上游（失败留空 → 下次进入重试）。
@@ -1547,6 +1550,7 @@ const CFG_MAP = {
   request_client_info: ['logging', 'request_client_info'],
   models_hidden: ['models', 'hidden'],
   models_aliases: ['models', 'aliases'],
+  client_keys_enabled: ['client_keys', 'enabled'],
 };
 /* 「覆盖型」文本字段：空串本身是有意义的取值（= 回落到内置默认），必须照发。
  *
@@ -5005,4 +5009,300 @@ if ($('btnEventExport')) $('btnEventExport').onclick = () => {
   a.download = 'request-events-' + new Date().toISOString().slice(0, 10) + '.json';
   a.click();
   URL.revokeObjectURL(url);
+};
+
+/* ── API Keys（客户下游 Key：绑定账号 + 积分额度） ───────────────────
+ *
+ * 服务端：internal/panel/clientkeys.go → internal/gatewaykey（存储/口径）。
+ * 三个必须记住的事实，界面上都要说清楚，否则用户会按直觉误解：
+ *  1. 明文 key 只在「新建」与「轮换」那一次返回，之后服务端只剩 sha256——
+ *     所以这里必须当场展示并给复制按钮，关掉弹窗就再也取不回来。
+ *  2. 「绑定账号」是独占语义：绑了之后这些号只服务这把 Key，主密钥与其他
+ *     未绑定的 Key 都用不到了。绑定前必须二次确认。
+ *  3. 额度只吃上游实测 credit；「未知」列是提醒「这个 key 其实没被完全限住」，
+ *     不是装饰。 */
+
+let ckData = null;          // 最近一次 GET /client_keys 的结果
+let ckBindable = null;      // {uid, nickname, healthy, disabled, credits, owner}[]
+let ckEditing = null;       // 正在编辑的 key id（null = 新建）
+let ckBinds = [];           // 编辑弹窗里当前勾选的 uid
+let ckSecretValue = '';     // 新建/轮换后待复制的明文（只在本机内存里活到弹窗关闭）
+
+function ckPeriodLabel(period) {
+  if (period === 'day') return '每日重置';
+  if (period === 'total') return '累计总额';
+  return '不限额';
+}
+
+function ckFmtCredit(n) {
+  if (n == null || isNaN(n)) return '—';
+  return Number(n).toFixed(2).replace(/\.00$/, '');
+}
+
+/* 额度进度条：宽度按 已用/上限；用尽后整条变红，剩余量写在右侧。
+   不限额时不画条——画一条满格会让人误以为「快用完了」。 */
+function ckQuotaCell(k) {
+  const lim = k.limits || {};
+  if (!lim.period || !(lim.credits > 0)) {
+    return '<span class="note">不限额</span>';
+  }
+  const used = Number(k.used || 0), total = Number(lim.credits);
+  const pct = Math.max(0, Math.min(100, total > 0 ? used / total * 100 : 0));
+  const cls = k.exhausted ? ' bad' : (pct >= 80 ? ' warn' : '');
+  return '<div class="ck-quota' + cls + '">' +
+    '<div class="ck-q-bar"><i style="width:' + pct.toFixed(1) + '%"></i></div>' +
+    '<div class="ck-q-txt"><b>' + esc(ckFmtCredit(used)) + '</b> / ' + esc(ckFmtCredit(total)) +
+    ' · ' + esc(ckPeriodLabel(lim.period)) + '</div></div>';
+}
+
+function ckBindCell(k) {
+  if (!k.binds || !k.binds.length) {
+    return '<span class="note">不绑定（' + (k.binds_all ? '全池可用' : '共享全池') + '）</span>';
+  }
+  const names = k.binds.map(uid => {
+    const a = (ckBindable || []).find(x => x.uid === uid);
+    return a && a.nickname ? a.nickname : uid.slice(0, 8);
+  });
+  const shown = names.slice(0, 3).join('、') + (names.length > 3 ? ' 等 ' + names.length + ' 个' : '');
+  return '<span class="ck-bind" title="' + esc(k.binds.join('\n')) + '">🔒 ' + esc(shown) + '</span>';
+}
+
+function renderClientKeys() {
+  const tb = $('ckBody');
+  if (!tb) return;
+  const d = ckData || {};
+  const keys = d.keys || [];
+  $('ckNote').textContent = d.path ? ('存储：' + d.path) : '—';
+  $('ckSummary').textContent = d.enabled === false
+    ? '功能已关闭（config client_keys.enabled=false），已签发的 Key 均不生效'
+    : keys.length + ' 把';
+  if (!d.enabled) {
+    setHTML(tb, '<tr><td colspan="8"><div class="empty"><div class="big">客户 API Key 未启用</div>' +
+      esc(d.error || '在「配置」里打开 client_keys.enabled 后刷新本页。') + '</div></td></tr>');
+    return;
+  }
+  if (!keys.length) {
+    setHTML(tb, '<tr><td colspan="8"><div class="empty"><div class="big">还没有任何客户 Key</div>' +
+      '点右上角「新建 Key」签发一把：可以绑定若干账号独占使用，并按积分设额度。</div></td></tr>');
+    return;
+  }
+  setHTML(tb, keys.map(k => {
+    const st = k.disabled
+      ? '<span class="tag bad">已停用</span>'
+      : (k.exhausted ? '<span class="tag warn">额度用尽</span>' : '<span class="tag ok">启用</span>');
+    return '<tr data-ck="' + esc(k.id) + '"' + (k.disabled ? ' class="off"' : '') + '>' +
+      '<td><div class="ck-name">' + esc(k.name) + '</div>' +
+        (k.remark ? '<div class="ck-remark" title="' + esc(k.remark) + '">' + esc(k.remark) + '</div>' : '') + '</td>' +
+      '<td><code class="ck-hint" title="明文只在创建时显示一次；忘了就轮换">••••' + esc(k.key_hint || '') + '</code></td>' +
+      '<td>' + ckBindCell(k) + '</td>' +
+      '<td>' + ckQuotaCell(k) + '</td>' +
+      '<td><span class="ck-num">' + esc(String(k.requests || 0)) + '</span>' +
+        (k.unknown_credits ? ' <span class="note" title="上游没有回报 usage.credit 的请求数：这些请求不扣额度">/ 未知 ' + esc(String(k.unknown_credits)) + '</span>' : '') +
+      '</td>' +
+      '<td>' + esc(ago(k.last_used_at)) + '</td>' +
+      '<td>' + st + '</td>' +
+      '<td class="ck-ops">' +
+        '<button class="xs" data-ck-act="edit" data-ck-id="' + esc(k.id) + '">编辑</button> ' +
+        '<button class="xs" data-ck-act="rotate" data-ck-id="' + esc(k.id) + '">轮换</button> ' +
+        (k.limits && k.limits.period
+          ? '<button class="xs" data-ck-act="reset" data-ck-id="' + esc(k.id) + '" title="把本周期已用额度归零">重置额度</button> '
+          : '') +
+        '<button class="xs" data-ck-act="toggle" data-ck-id="' + esc(k.id) + '">' + (k.disabled ? '启用' : '停用') + '</button> ' +
+        '<button class="xs danger" data-ck-act="delete" data-ck-id="' + esc(k.id) + '">删除</button>' +
+      '</td></tr>';
+  }).join(''));
+}
+
+async function loadClientKeys() {
+  try {
+    const [d, b] = await Promise.all([
+      api('client_keys'),
+      api('client_keys/bindable').catch(() => ({ accounts: [] })),
+    ]);
+    ckData = d;
+    ckBindable = b.accounts || [];
+    renderClientKeys();
+  } catch (e) {
+    ckData = { enabled: true, keys: [], error: '读取客户 Key 失败：' + e.message };
+    renderClientKeys();
+  }
+}
+
+/* 新建/编辑弹窗：名称、备注、绑定账号（多选）、额度周期与上限。
+   编辑时也允许改绑定——这是最常用的一次操作（给某把 Key 加号）。 */
+function ckOpenEditor(id) {
+  ckEditing = id || null;
+  const k = id ? (ckData.keys || []).find(x => x.id === id) : null;
+  ckBinds = k && k.binds ? k.binds.slice() : [];
+  ckSecretValue = '';
+  $('ckEditTitle').textContent = k ? '编辑 Key：' + k.name : '新建客户 Key';
+  $('ckName').value = k ? k.name : '';
+  $('ckRemark').value = k ? (k.remark || '') : '';
+  const lim = (k && k.limits) || {};
+  $('ckPeriod').value = lim.period || '';
+  $('ckCredits').value = lim.period ? String(lim.credits) : '';
+  ckEditErr('');
+  ckSyncPeriodUI();
+  ckRenderBindList();
+  ckShowSecret('');
+  $('btnCkSave').textContent = ckEditing ? '保存修改' : '创建';
+  $('ckEditVeil').classList.add('on');
+}
+
+/* 周期为空 = 不限额，此时上限输入框禁用且清空：
+   留着上次的 10 会让人以为「不限额但最多 10」，与语义相反。 */
+function ckSyncPeriodUI() {
+  const on = !!$('ckPeriod').value;
+  $('ckCredits').disabled = !on;
+  $('ckCredits').placeholder = on ? '如 100' : '不限额';
+  if (!on) $('ckCredits').value = '';
+}
+
+function ckRenderBindList() {
+  const box = $('ckBindList');
+  if (!box) return;
+  const list = ckBindable || [];
+  if (!list.length) {
+    setHTML(box, '<div class="empty">账号池为空：先在「账号池」添加账号，再回来绑定。</div>');
+    return;
+  }
+  setHTML(box, list.map(a => {
+    const on = ckBinds.indexOf(a.uid) >= 0;
+    const state = a.disabled ? '已禁用' : (a.healthy ? '可用' : '冷却中');
+    return '<label class="ck-bind-row' + (on ? ' on' : '') + '">' +
+      '<input type="checkbox" data-ck-uid="' + esc(a.uid) + '"' + (on ? ' checked' : '') + '>' +
+      '<span class="ck-bind-name">' + esc(a.nickname || a.uid.slice(0, 8)) + '</span>' +
+      '<span class="ck-bind-meta">' + esc(state) + ' · ' + esc(String(a.credits || 0)) + ' 分</span>' +
+      (a.owner ? '<span class="ck-bind-owner" title="该账号已被其他 Key 绑定">已绑给 ' + esc(a.owner) + '</span>' : '') +
+      '</label>';
+  }).join(''));
+}
+
+function ckSubmitEditor() {
+  const name = $('ckName').value.trim();
+  if (!name) { ckEditErr('名称不能为空：列表里要靠它区分不同的 Key'); return; }
+  const period = $('ckPeriod').value;
+  const credits = Number($('ckCredits').value || 0);
+  if (period && !(credits > 0)) { ckEditErr('设了额度周期就要填一个大于 0 的积分上限（不限额请选「不限额」）'); return; }
+  const body = {
+    name: name,
+    remark: $('ckRemark').value.trim(),
+    binds: ckBinds.slice(),
+    limits: period ? { period: period, credits: credits } : { period: '', credits: 0 },
+  };
+  if (ckEditing) {
+    api('client_keys/' + encodeURIComponent(ckEditing), { method: 'POST', body: JSON.stringify(body) })
+      .then(() => { $('ckEditVeil').classList.remove('on'); toast('已保存'); loadClientKeys(); })
+      .catch(e => ckEditErr(e.message));
+    return;
+  }
+  api('client_keys', { method: 'POST', body: JSON.stringify(body) })
+    .then(d => {
+      // 明文只此一次：留在同一个弹窗里展示，而不是关掉再 toast——一关就永久丢失。
+      ckShowSecret(d.key);
+      ckEditing = d.client_key.id;
+      $('ckEditTitle').textContent = '已创建：' + d.client_key.name;
+      $('ckName').value = d.client_key.name;
+      $('btnCkSave').textContent = '保存修改';
+      toast('已签发新 Key：请立刻复制（之后无法再取回）');
+      loadClientKeys();
+    })
+    .catch(e => ckEditErr(e.message));
+}
+
+function ckEditErr(msg) {
+  const el = $('ckEditErr');
+  if (!el) return;
+  el.hidden = !msg;
+  el.textContent = msg || '';
+}
+
+/* 明文展示区：空值 = 隐藏。 */
+function ckShowSecret(v) {
+  ckSecretValue = v || '';
+  const box = $('ckSecretBox');
+  if (!box) return;
+  box.hidden = !ckSecretValue;
+  if ($('ckSecret')) $('ckSecret').textContent = ckSecretValue;
+}
+
+function ckConfirmBinds(done) {
+  // 绑定的独占语义不可从界面「看出来」：新绑的号会立刻从主密钥与其他 Key 的
+  // 候选里消失。第一次绑定时必须把后果说清楚，否则现象是「别的客户端突然 503」。
+  if (!ckBinds.length) { done(); return; }
+  const msg = '这会把 ' + ckBinds.length + ' 个账号绑定为独占：\n\n' +
+    '• 这把 Key 只用这些账号；\n' +
+    '• 这些账号同时也不再服务主密钥与其他未绑定的 Key。\n\n' +
+    '如果其他客户端还在用主密钥，它们会立刻用不到这些账号（可能报「无可用账号」）。\n确认绑定？';
+  if (confirm(msg)) done();
+}
+
+// 事件委托：操作按钮都渲染成 data-ck-act/data-ck-id，避免逐行绑 handler
+// （行会被整段 innerHTML 替换，逐个绑定必然漏）。document 判空是为了让
+// 前端测试能只截取片段在无 DOM 的 vm 里跑（见 frontend_test.go）。
+if (typeof document !== 'undefined' && document) document.addEventListener('click', ev => {
+  const btn = ev.target.closest && ev.target.closest('[data-ck-act]');
+  if (!btn) return;
+  const id = btn.getAttribute('data-ck-id');
+  const act = btn.getAttribute('data-ck-act');
+  const k = (ckData && ckData.keys || []).find(x => x.id === id);
+  if (!k) return;
+  if (act === 'edit') { ckOpenEditor(id); return; }
+  if (act === 'rotate') {
+    if (!confirm('轮换会立刻让旧 key 失效，并生成一把新的（绑定与额度设置保留）。\n\n用旧 key 的客户端会开始 401，确认轮换？')) return;
+    api('client_keys/' + encodeURIComponent(id) + '/rotate', { method: 'POST' })
+      .then(d => {
+        toast('已轮换：新 key 只显示一次，请立刻复制');
+        loadClientKeys();
+        ckOpenEditor(id);
+        ckShowSecret(d.key);
+      })
+      .catch(e => toast('轮换失败：' + e.message, 'err'));
+    return;
+  }
+  if (act === 'reset') {
+    if (!confirm('把「' + k.name + '」本周期已用额度归零？（请求统计与历史观测值保留）')) return;
+    api('client_keys/' + encodeURIComponent(id) + '/reset_usage', { method: 'POST' })
+      .then(() => { toast('额度已重置'); loadClientKeys(); })
+      .catch(e => toast('重置失败：' + e.message, 'err'));
+    return;
+  }
+  if (act === 'toggle') {
+    api('client_keys/' + encodeURIComponent(id), { method: 'POST', body: JSON.stringify({ disabled: !k.disabled }) })
+      .then(() => { toast(k.disabled ? '已启用' : '已停用'); loadClientKeys(); })
+      .catch(e => toast('操作失败：' + e.message, 'err'));
+    return;
+  }
+  if (act === 'delete') {
+    if (!confirm('删除「' + k.name + '」？\n\n使用这把 key 的客户端会立刻 401，且无法恢复（只能重新签发）。')) return;
+    api('client_keys/' + encodeURIComponent(id) + '/delete', { method: 'POST' })
+      .then(() => { toast('已删除'); loadClientKeys(); })
+      .catch(e => toast('删除失败：' + e.message, 'err'));
+    return;
+  }
+});
+
+if ($('btnCkNew')) $('btnCkNew').onclick = () => ckOpenEditor(null);
+if ($('btnCkReload')) $('btnCkReload').onclick = loadClientKeys;
+if ($('ckPeriod')) $('ckPeriod').onchange = ckSyncPeriodUI;
+if ($('ckEditVeil')) $('ckEditVeil').onclick = ev => { if (ev.target === $('ckEditVeil')) $('ckEditVeil').classList.remove('on'); };
+// 绑定勾选同理：行由 ckRenderBindList 整段重绘，用委托；同样判空以支持片段测试。
+if ($('ckBindList') && $('ckBindList').addEventListener) $('ckBindList').addEventListener('change', ev => {
+  const cb = ev.target.closest && ev.target.closest('input[data-uid]');
+  if (!cb) return;
+  const uid = cb.getAttribute('data-uid');
+  if (cb.checked) { if (ckBinds.indexOf(uid) < 0) ckBinds.push(uid); }
+  else ckBinds = ckBinds.filter(x => x !== uid);
+  ckRenderBindList();
+});
+if ($('btnCkBindAll')) $('btnCkBindAll').onclick = () => { ckBinds = (ckBindable || []).map(a => a.uid); ckRenderBindList(); };
+if ($('btnCkBindNone')) $('btnCkBindNone').onclick = () => { ckBinds = []; ckRenderBindList(); };
+if ($('btnCkSave')) $('btnCkSave').onclick = () => { if (ckEditing) ckSubmitEditor(); else ckConfirmBinds(ckSubmitEditor); };
+if ($('btnCkCancel')) $('btnCkCancel').onclick = () => $('ckEditVeil').classList.remove('on');
+if ($('btnCkCopy')) $('btnCkCopy').onclick = () => {
+  if (!ckSecretValue) return;
+  navigator.clipboard.writeText(ckSecretValue).then(
+    () => toast('已复制'),
+    () => toast('复制失败，请手动选中复制', 'err'),
+  );
 };

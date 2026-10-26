@@ -4,6 +4,7 @@ package panel
 
 import (
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
@@ -172,7 +173,7 @@ func TestBndCreditHistoryFullLedgerFieldTypes(t *testing.T) {
 // 账本未装配 → 501 固定文案；空账本 → entries=[]；api_key 为空 → 不鉴权。
 func TestBndCreditHistoryNilLedgerAndOpenAuth(t *testing.T) {
 	// 未装配账本 = 501（与 RequestLog 同语义）。
-	missing := New(Config{Version: "test", APIKey: "test-key", Pool: pool.New("")})
+	missing := New(Config{Version: "test", APIKey: "test-key", Pool: pool.New(""), PanelAuth: func() (string, string) { return testUser, testPass }})
 	code, body := creditGet(t, missing, "")
 	if code != 501 || !strings.Contains(body, "credit history not available") {
 		t.Fatalf("nil 账本应回 501 + 固定文案，得到 %d %s", code, body)
@@ -180,23 +181,36 @@ func TestBndCreditHistoryNilLedgerAndOpenAuth(t *testing.T) {
 
 	// 空账本 → entries 必须是 []，不是 null。
 	l := credithist.New("", 100)
-	empty := New(Config{Version: "test", APIKey: "test-key", Pool: pool.New(""), CreditHistory: l})
+	empty := New(Config{Version: "test", APIKey: "test-key", Pool: pool.New(""), CreditHistory: l, PanelAuth: func() (string, string) { return testUser, testPass }})
 	code, body = creditGet(t, empty, "")
 	if code != 200 || !strings.Contains(body, `"entries":[]`) {
 		t.Fatalf("空账本应回 200 且 entries=[]，得到 %d %s", code, body)
 	}
 
-	// api_key 为空 = 不启用鉴权（既有语义）：无 Authorization 头也应放行。
+	// 面板鉴权与网关 api_key 无关：只要配了登录账号，未登录一律 401。
+	// （旧语义「api_key 为空即不鉴权」已经废弃——把「忘了配」当成「开放访问」
+	// 对能改配置、能停用账号的面板来说是最危险的失败模式。）
 	l.Observe("u1", 0)
 	l.Observe("u1", 5)
-	open := New(Config{Version: "test", Pool: pool.New(""), CreditHistory: l})
+	open := New(Config{Version: "test", Pool: pool.New(""), CreditHistory: l,
+		PanelAuth: func() (string, string) { return testUser, testPass }})
+	// 未登录 → 401
 	req := httptest.NewRequest("GET", "/panel/api/credit_history", nil)
 	rr := httptest.NewRecorder()
 	open.ServeHTTP(rr, req)
-	if rr.Code != 200 {
-		t.Fatalf("无 api_key 应放行，得到 %d %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("未登录应 401，得到 %d %s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), `"delta":5`) {
-		t.Fatalf("应返回流水，得到 %s", rr.Body.String())
+
+	// 登录后 → 200 且带流水
+	req2 := httptest.NewRequest("GET", "/panel/api/credit_history", nil)
+	req2.AddCookie(sessionFor(t, open))
+	rr2 := httptest.NewRecorder()
+	open.ServeHTTP(rr2, req2)
+	if rr2.Code != http.StatusOK {
+		t.Fatalf("登录后应 200，得到 %d %s", rr2.Code, rr2.Body.String())
+	}
+	if !strings.Contains(rr2.Body.String(), `"delta":5`) {
+		t.Fatalf("应返回流水，得到 %s", rr2.Body.String())
 	}
 }

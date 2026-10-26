@@ -12,7 +12,7 @@ import (
 
 // TestRunGrowthQueueNowUnguarded 排程入口在未接线（无上游）时安全返回，不 panic。
 func TestRunGrowthQueueNowUnguarded(t *testing.T) {
-	p := New(Config{Version: "test", Pool: pool.New("")})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Version: "test", Pool: pool.New("")})
 	total, msg := p.RunGrowthQueueNow()
 	if total != 0 || msg == "" {
 		t.Errorf("total=%d msg=%q want 0 + 原因文案", total, msg)
@@ -22,7 +22,7 @@ func TestRunGrowthQueueNowUnguarded(t *testing.T) {
 // TestRunGrowthQueueNowBusy 账号被其它任务动作占用（per-account 锁）时，排程轮次
 // 不重复启动该账号的后台作业——与手动/队列入口共用同一把锁。
 func TestRunGrowthQueueNowBusy(t *testing.T) {
-	p := New(Config{Version: "test", Pool: pool.New("")})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Version: "test", Pool: pool.New("")})
 	p.cfg.AutoTasksEnabled = func() bool { return true }
 	p.cfg.Pool.Add(&auth.Auth{UID: "busy-1", AccessToken: "t"})
 	if err := p.StartTaskJobs(context.Background(), filepath.Join(t.TempDir(), "task-jobs.json")); err != nil {
@@ -44,7 +44,7 @@ func TestRunGrowthQueueNowBusy(t *testing.T) {
 // TestRunQueueItemsSummaryAndNotify 一轮跑完的汇总文案与推送开关：
 // 排程轮次（notify=true）推一条，手动轮次（false）只落日志。
 func TestRunQueueItemsSummaryAndNotify(t *testing.T) {
-	p := New(Config{Version: "test"})
+	p := New(Config{PanelAuth: func() (string, string) { return testUser, testPass }, Version: "test"})
 	var got string
 	p.SetNotifier(func(s string) { got = s })
 	q := p.queue()
