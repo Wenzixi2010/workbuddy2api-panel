@@ -1,0 +1,498 @@
+/* React 版新增/补强的类。
+ *
+ * legacy.css 是旧面板整套样式（设计令牌 + 布局 + 各视图表格），保留它可以让
+ * 外观与旧版逐像素一致、也省掉一轮视觉回归；这里只补 React 版新增的结构类。
+ */
+
+/* ── 概览统计卡 ─────────────────────────────────────────── */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.stat {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px 13px;
+}
+.stat .k {
+  color: var(--ink-3);
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+}
+.stat .v {
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 通用表格补充 ───────────────────────────────────────── */
+.tbl td.num,
+.tbl th.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.dim {
+  color: var(--ink-3);
+}
+.tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.7;
+  border: 1px solid var(--line);
+  color: var(--ink-2);
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.tag.ok {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 40%, var(--line));
+  background: var(--ok-soft);
+}
+.tag.warn {
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 40%, var(--line));
+  background: var(--warn-soft);
+}
+.tag.bad {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 40%, var(--line));
+  background: var(--bad-soft);
+}
+
+/* ── 卡片与内边距 ───────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.card + .card {
+  margin-top: 12px;
+}
+.card .pad {
+  padding: 16px 18px;
+}
+.card .pad h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--ink-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.empty.err {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 35%, var(--line));
+  background: var(--bad-soft);
+}
+
+.note {
+  color: var(--ink-3);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.note.err {
+  color: var(--bad);
+}
+.note.warn {
+  color: var(--warn);
+}
+
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.grow {
+  flex: 1;
+}
+
+/* ── 按钮 ───────────────────────────────────────────────── */
+.btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink);
+  font: 13px/1.4 var(--sans);
+  padding: 7px 13px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.btn:hover:not(:disabled) {
+  background: var(--raise);
+  border-color: var(--ink-3);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 550;
+}
+.btn.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  border-color: var(--accent);
+}
+.btn.ghost {
+  background: transparent;
+}
+.btn.sm {
+  padding: 3px 9px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+/* ── 表单 ───────────────────────────────────────────────── */
+.fld {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fld > span {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.fld input,
+.fld select,
+.fld textarea {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  font: 13px/1.5 var(--sans);
+  padding: 8px 10px;
+  width: 100%;
+}
+.fld input:focus,
+.fld select:focus,
+.fld textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.fld input:disabled {
+  opacity: 0.6;
+}
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+@media (max-width: 560px) {
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── 弹窗 ───────────────────────────────────────────────── */
+.veil {
+  position: fixed;
+  inset: 0;
+  background: rgba(6, 8, 14, 0.62);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 60;
+  overflow: auto;
+}
+.veil .modal {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  width: 100%;
+  max-width: 620px;
+  padding: 20px 22px;
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+}
+.veil .modal h3 {
+  font-size: 15px;
+  font-weight: 620;
+  margin-bottom: 14px;
+}
+
+/* ── toast ──────────────────────────────────────────────── */
+.toasts {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 80;
+  pointer-events: none;
+}
+.tst {
+  background: var(--raise);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 9px 14px;
+  color: var(--ink);
+  font-size: 13px;
+  box-shadow: var(--shadow);
+  max-width: 380px;
+  animation: tst-in 0.16s ease-out;
+}
+.tst.ok {
+  border-left-color: var(--ok);
+}
+.tst.err {
+  border-left-color: var(--bad);
+}
+@keyframes tst-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* ── 客户 Key 视图 ──────────────────────────────────────── */
+.ck-tbl .ck-name {
+  font-weight: 550;
+}
+.ck-tbl .ck-remark {
+  color: var(--ink-3);
+  font-size: 11.5px;
+  margin-top: 2px;
+}
+.ck-tbl .ck-ops {
+  white-space: nowrap;
+}
+.ck-tbl .ck-ops .btn + .btn {
+  margin-left: 4px;
+}
+.ck-bind {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.ck-quota {
+  min-width: 132px;
+}
+.ck-q-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.ck-q-bar i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.ck-quota.warn .ck-q-bar i {
+  background: var(--warn);
+}
+.ck-quota.bad .ck-q-bar i {
+  background: var(--bad);
+}
+.ck-q-txt {
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.ck-q-txt b {
+  color: var(--ink-2);
+  font-weight: 600;
+}
+
+.ck-bind-hd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.ck-bind-list {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--surface-2);
+}
+.ck-bind-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 11px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--line-soft);
+}
+.ck-bind-row:last-child {
+  border-bottom: none;
+}
+.ck-bind-row:hover {
+  background: var(--raise);
+}
+.ck-bind-name {
+  font-size: 12.5px;
+}
+.ck-bind-meta {
+  color: var(--ink-3);
+  font-size: 11.5px;
+}
+.ck-bind-owner {
+  margin-left: auto;
+  color: var(--warn);
+  font-size: 11px;
+}
+
+.ck-secret-box {
+  margin-top: 14px;
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line));
+  background: var(--warn-soft);
+  border-radius: 10px;
+  padding: 12px;
+}
+.ck-secret {
+  font: 12.5px/1.5 var(--mono);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  word-break: break-all;
+  user-select: all;
+}
+
+/* ── 配置与日志 ─────────────────────────────────────────── */
+.cfg-json {
+  font: 12px/1.55 var(--mono);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  overflow: auto;
+  max-height: 460px;
+  color: var(--ink-2);
+}
+.log-box {
+  font: 12px/1.6 var(--mono);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 14px 16px;
+  overflow: auto;
+  height: calc(100vh - 190px);
+  min-height: 240px;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ── 登录页 ─────────────────────────────────────────────── */
+.login-wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--bg);
+}
+.login-card {
+  width: 100%;
+  max-width: 380px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 26px 26px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 4px;
+}
+.login-logo {
+  /* 图标自带青紫渐变与圆角，这里只做定位容器。
+     再加一层 accent 底色会让渐变的边缘糊成脏色（两套颜色叠在一起）。 */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  filter: drop-shadow(0 2px 6px color-mix(in srgb, #6C4DFF 26%, transparent));
+}
+.login-title {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.login-sub {
+  color: var(--ink-3);
+  font-size: 12px;
+  margin-top: 1px;
+}
+.login-btn {
+  margin-top: 4px;
+  padding: 9px 13px;
+}
+.login-err {
+  margin-top: -4px;
+}
+.login-note {
+  font-size: 12px;
+  line-height: 1.6;
+  border-radius: 9px;
+  padding: 10px 12px;
+}
+.login-note.warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line));
+}
+.login-note pre {
+  font: 11.5px/1.5 var(--mono);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 8px 10px;
+  margin: 8px 0;
+  overflow: auto;
+  color: var(--ink-2);
+}
+
+/* 首屏空白（会话查询中）：给一个轻微呼吸点，避免纯白/纯黑闪一下 */
+.boot {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+.boot-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  animation: boot-pulse 1s ease-in-out infinite;
+}
+@keyframes boot-pulse {
+  0%, 100% { opacity: 0.25; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
+}

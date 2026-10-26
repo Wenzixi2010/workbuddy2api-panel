@@ -52,3 +52,14 @@ server.exe
 # 编译产物（16MB 误提交过一次，20261021）
 /server
 /app.toml
+
+# 前端（React + Vite）
+web/node_modules/
+web/dist/
+# 构建产物由 build.sh 生成并 go:embed；只保留占位文件保证目录存在
+# （go:embed all:dist 在目录缺失时是编译期错误，而 git 不跟踪空目录）
+internal/panel/dist/*
+!internal/panel/dist/.gitkeep-dist
+
+# 本地临时目录（上游参考代码、构建中间产物、远端部署脚本）
+/Temp/

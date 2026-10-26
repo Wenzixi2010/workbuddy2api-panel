@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WorkBuddy2API · 控制台</title>
+<link rel="icon" type="image/svg+xml" href="/panel/favicon.svg">
+<!-- 首屏主题预热：必须留在样式表之前、且是同步脚本。
+     html 上的 data-theme="dark" 只是无脚本兜底；真实偏好在 localStorage。
+     把这个判定放在样式表之前，第一帧就是最终主题，不会「先闪深色再变浅色」。
+     CSP 是 script-src 'self'，所以不能写成内联块（会被直接拦掉）。 -->
+<script src="/panel/theme.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script type="module" src="/src/main.tsx"></script>
+</body>
+</html>
