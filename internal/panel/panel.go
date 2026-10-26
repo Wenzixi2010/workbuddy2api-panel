@@ -306,6 +306,8 @@ func (p *Panel) routes() {
 	p.mux.HandleFunc("GET /panel/api/usage", p.withAuth(p.usage))
 	p.mux.HandleFunc("POST /panel/api/usage/save", p.withAuth(p.usageSave))
 	p.mux.HandleFunc("GET /panel/api/model_probes", p.withAuth(p.modelProbes))
+	// 模型可用性测试：指定账号 + 模型发最小非流式请求，返回成功/失败与耗时。
+	p.mux.HandleFunc("POST /panel/api/models/test", p.withAuth(p.modelTest))
 	// 客户 API Key（下游客户端用的网关 Key）：签发/绑定账号/积分额度。
 	p.mux.HandleFunc("GET /panel/api/client_keys", p.withAuth(p.clientKeys))
 	p.mux.HandleFunc("POST /panel/api/client_keys", p.withAuth(p.clientKeyCreate))

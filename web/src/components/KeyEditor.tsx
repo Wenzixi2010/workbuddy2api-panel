@@ -24,6 +24,7 @@ export default function KeyEditor({ keyItem, accounts, onClose, onSaved, onToast
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [secret, setSecret] = useState('')
+  const [customKey, setCustomKey] = useState('')
 
   const sorted = useMemo(
     () => [...accounts].sort((a, b) => Number(b.healthy) - Number(a.healthy)),
@@ -57,6 +58,7 @@ export default function KeyEditor({ keyItem, accounts, onClose, onSaved, onToast
       remark: remark.trim(),
       binds,
       limits: period ? { period, credits: Number(credits) } : { period: '', credits: 0 },
+      ...(customKey.trim() ? { key: customKey.trim() } : {}),
     }
     try {
       if (isNew) {
@@ -66,8 +68,16 @@ export default function KeyEditor({ keyItem, accounts, onClose, onSaved, onToast
         onToast('已创建', 'ok')
       } else {
         await api(`client_keys/${encodeURIComponent(keyItem.id)}`, { method: 'POST', body })
-        onToast('已保存', 'ok')
-        onSaved()
+        // 编辑时填了自定义 Key：Update 不改明文，需再轮换一次到指定值。
+        if (customKey.trim()) {
+          const d = await api<{ key?: string }>(`client_keys/${encodeURIComponent(keyItem.id)}/rotate`, {
+            method: 'POST',
+            body: { key: customKey.trim() },
+          })
+          if (d.key) setSecret(d.key)
+        }
+        onToast(customKey.trim() ? '已保存并轮换到自定义 Key' : '已保存', 'ok')
+        if (!customKey.trim()) onSaved()
       }
     } catch (e) {
       setErr(errText(e))
@@ -110,6 +120,20 @@ export default function KeyEditor({ keyItem, accounts, onClose, onSaved, onToast
               placeholder="例：100"
             />
           </div>
+        </div>
+
+        <div className="fld" style={{ marginBottom: 10 }}>
+          <span>
+            自定义 Key（可选）
+            <span className="dim"> 留空自动生成 gw- 前缀随机 Key；填了则用它（8–128 位，无空格）</span>
+          </span>
+          <input
+            value={customKey}
+            onChange={(e) => setCustomKey(e.target.value)}
+            placeholder={isNew ? '留空 = 自动生成' : '留空 = 不修改明文'}
+            autoComplete="off"
+            spellCheck={false}
+          />
         </div>
 
         <div className="ck-bind-hd">

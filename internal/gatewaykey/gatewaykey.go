@@ -479,18 +479,45 @@ type Input struct {
 	BindsAll *bool     `json:"binds_all"`
 	Limits   *Limits   `json:"limits"`
 	Disabled *bool     `json:"disabled"`
+	// Key 自定义明文（可选）：Create/RotateTo 时若非空则用它而非随机生成。
+	// 留空 = 沿用随机 32 字节；给值则做 validateKey 校验后落 sha256。
+	Key *string `json:"key,omitempty"`
+}
+
+// validateKey 校验自定义明文：非空、不含空白、长度在 [8, 128] 字节之间。
+// 不强求 gw- 前缀——有些下游要贴自己的固定 Key 值；但留出提示由调用方决定。
+func validateKey(plain string) error {
+	p := strings.TrimSpace(plain)
+	if p == "" {
+		return errors.New("自定义 Key 不能为空")
+	}
+	if strings.ContainsAny(p, " \t\r\n") {
+		return errors.New("自定义 Key 不能包含空白字符")
+	}
+	if n := len(p); n < 8 || n > 128 {
+		return fmt.Errorf("自定义 Key 长度需在 8–128 字节之间（当前 %d）", n)
+	}
+	return nil
 }
 
 // Create 新建客户 Key，返回明文（**仅此一次**）与视图。
 //
-// 32 字节 crypto/rand（256 bit）+ base64url 无填充，前缀 gw-：暴力枚举不可行，
-// 长度与主流网关 Key 相当。
+// 默认 32 字节 crypto/rand（256 bit）+ base64url 无填充，前缀 gw-：暴力枚举不可行，
+// 长度与主流网关 Key 相当。in.Key 非空时改用调用方提供的自定义明文（validateKey 校验）。
 func (s *Store) Create(in Input) (string, View, error) {
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return "", View{}, fmt.Errorf("generate key: %w", err)
+	plain := ""
+	if in.Key != nil && strings.TrimSpace(*in.Key) != "" {
+		if err := validateKey(*in.Key); err != nil {
+			return "", View{}, err
+		}
+		plain = strings.TrimSpace(*in.Key)
+	} else {
+		raw := make([]byte, 32)
+		if _, err := rand.Read(raw); err != nil {
+			return "", View{}, fmt.Errorf("generate key: %w", err)
+		}
+		plain = KeyPrefix + base64.RawURLEncoding.EncodeToString(raw)
 	}
-	plain := KeyPrefix + base64.RawURLEncoding.EncodeToString(raw)
 
 	name := ""
 	if in.Name != nil {
@@ -519,6 +546,12 @@ func (s *Store) Create(in Input) (string, View, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// 自定义明文可能与已有 Key 冲突：hash 撞了意味着两把 Key 认同一段明文，
+	// 认证会串号（这把的额度记到那把头上）。随机生成的 256bit 碰撞概率可忽略，
+	// 但自定义明文必须显式拦。
+	if _, dup := s.byKey[hashKey(plain)]; dup {
+		return "", View{}, errors.New("自定义 Key 与已有客户 Key 重复，请换一个")
+	}
 	r := Record{
 		ID:        newID(now, len(s.recs)),
 		Name:      name,
@@ -654,13 +687,27 @@ func (s *Store) Rotate(id string) (string, View, error) {
 	if _, err := rand.Read(raw); err != nil {
 		return "", View{}, fmt.Errorf("generate key: %w", err)
 	}
-	plain := KeyPrefix + base64.RawURLEncoding.EncodeToString(raw)
+	return s.rotateWithPlain(id, KeyPrefix+base64.RawURLEncoding.EncodeToString(raw))
+}
 
+// RotateTo 轮换到调用方指定的自定义明文（旧明文立即失效）。
+// customKey 走 validateKey + 唯一性校验，与 Create 的自定义口径一致。
+func (s *Store) RotateTo(id, customKey string) (string, View, error) {
+	if err := validateKey(customKey); err != nil {
+		return "", View{}, err
+	}
+	return s.rotateWithPlain(id, strings.TrimSpace(customKey))
+}
+
+func (s *Store) rotateWithPlain(id, plain string) (string, View, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	idx, ok := s.byID[id]
 	if !ok || idx >= len(s.recs) {
 		return "", View{}, ErrNotFound
+	}
+	if _, dup := s.byKey[hashKey(plain)]; dup && s.recs[idx].KeyHash != hashKey(plain) {
+		return "", View{}, errors.New("自定义 Key 与已有客户 Key 重复，请换一个")
 	}
 	r := &s.recs[idx]
 	prevHash, prevHint, prevUpdated := r.KeyHash, r.KeyHint, r.UpdatedAt

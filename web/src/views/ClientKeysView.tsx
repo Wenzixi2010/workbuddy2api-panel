@@ -34,6 +34,7 @@ export default function ClientKeysView({ onToast }: ViewProps) {
   const [err, setErr] = useState('')
   const [bindable, setBindable] = useState<BindableAccount[]>([])
   const [editing, setEditing] = useState<ClientKey | null | 'new'>(null)
+  const [viewing, setViewing] = useState<{ name: string; key: string } | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -63,6 +64,23 @@ export default function ClientKeysView({ onToast }: ViewProps) {
       void load()
     } catch (e) {
       onToast(`${okMsg}失败：${errText(e)}`, 'err')
+    }
+  }
+
+  // 查看明文：后端只存 sha256，旧明文永远取不回，所以「查看」= 轮换到一把新 Key
+  // 并当场展示（旧 key 立即失效）。这一步必须说清楚，否则用户以为能看到旧值。
+  const viewKey = async (k: ClientKey) => {
+    if (!confirm(`「${k.name}」的明文只存摘要、无法回显。\n\n点「查看」会轮换到一把新 Key（旧 key 立刻失效），并当场展示新明文。\n\n继续？`)) {
+      return
+    }
+    try {
+      const d = await api<{ key?: string }>(`client_keys/${encodeURIComponent(k.id)}/rotate`, {
+        method: 'POST',
+      })
+      setViewing({ name: k.name, key: d.key || '' })
+      void load()
+    } catch (e) {
+      onToast(`查看失败：${errText(e)}`, 'err')
     }
   }
 
@@ -150,13 +168,22 @@ export default function ClientKeysView({ onToast }: ViewProps) {
                     <div className="ck-name">{k.name}</div>
                     {k.remark ? <div className="ck-remark">{k.remark}</div> : null}
                   </td>
-                  <td className="mono dim">••••{k.key_hint}</td>
+                  <td className="mono dim">
+                    <span className="ck-key">••••{k.key_hint}</span>
+                    <button
+                      className="btn xs ghost"
+                      title="明文只在轮换时返回一次；查看 = 轮换到一把新 Key"
+                      onClick={() => void viewKey(k)}
+                    >
+                      查看
+                    </button>
+                  </td>
                   <td>
                     {k.binds.length === 0 ? (
                       <span className="dim">不绑定（共享全池）</span>
                     ) : (
                       <span className="ck-bind" title={k.binds.join('\n')}>
-                        🔒 {k.binds.length} 个
+                        <b>{k.binds.length}</b> 个
                       </span>
                     )}
                   </td>
@@ -238,6 +265,34 @@ export default function ClientKeysView({ onToast }: ViewProps) {
           }}
           onToast={onToast}
         />
+      ) : null}
+
+      {viewing ? (
+        <div className="veil on" onClick={(e) => e.target === e.currentTarget && setViewing(null)}>
+          <div className="modal" style={{ maxWidth: 520 }}>
+            <h3>查看密钥「{viewing.name}」</h3>
+            <div className="ck-secret-box">
+              <div className="note warn" style={{ marginBottom: 8 }}>
+                这是唯一一次显示明文；关掉就再也看不到（旧 Key 已失效，当前以下面这把为准）。
+              </div>
+              <div className="ck-secret">{viewing.key}</div>
+              <div className="row-actions" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
+                <button
+                  className="btn sm ghost"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(viewing.key)
+                    onToast('已复制', 'ok')
+                  }}
+                >
+                  复制
+                </button>
+                <button className="btn sm primary" onClick={() => setViewing(null)}>
+                  我已保存好
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       ) : null}
     </View>
   )

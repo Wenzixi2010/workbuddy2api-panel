@@ -14,6 +14,7 @@ package panel
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/misakano7545/workbuddy2api-panel/internal/gatewaykey"
 )
@@ -140,12 +141,29 @@ func (p *Panel) clientKeyDelete(w http.ResponseWriter, r *http.Request) {
 // clientKeyRotate 轮换明文（旧 key 立即失效，绑定与额度配置保留）。
 //
 //	POST /panel/api/client_keys/{id}/rotate
+//	body（可选）: {"key":"自定义明文"}——给了就用它轮换，不给则随机生成。
 func (p *Panel) clientKeyRotate(w http.ResponseWriter, r *http.Request) {
 	store := p.clientKeysStore(w)
 	if store == nil {
 		return
 	}
-	plain, view, err := store.Rotate(r.PathValue("id"))
+	id := r.PathValue("id")
+	var req struct {
+		Key string `json:"key"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req) // 空 body 不算错：随机轮换
+	}
+	var (
+		plain string
+		view  gatewaykey.View
+		err   error
+	)
+	if strings.TrimSpace(req.Key) != "" {
+		plain, view, err = store.RotateTo(id, req.Key)
+	} else {
+		plain, view, err = store.Rotate(id)
+	}
 	if err != nil {
 		status := http.StatusBadRequest
 		if err == gatewaykey.ErrNotFound {

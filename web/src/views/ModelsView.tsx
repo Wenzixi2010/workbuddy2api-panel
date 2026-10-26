@@ -42,6 +42,18 @@ type ModelsResp = {
   global_source?: string
 }
 
+/** POST /panel/api/models/test 的返回。 */
+type ModelTestResult = {
+  ok: boolean
+  elapsed_ms?: number
+  content?: string
+  model?: string
+  error?: string
+  kind?: string
+  status?: number
+  usage?: unknown
+}
+
 /** /panel/api/status 里的模型级限流全清单。 */
 type ModelLockRow = {
   model: string
@@ -274,6 +286,27 @@ export default function ModelsView(_props: ViewProps) {
   const [locks, setLocks] = useState<ModelLockRow[]>([])
   const [recent, setRecent] = useState<RecentEvent[]>([])
   const [probes, setProbes] = useState<Record<string, Probe>>({})
+  const [testing, setTesting] = useState<ModelItem | null>(null)
+  const [testUid, setTestUid] = useState('')
+  const [testBusy, setTestBusy] = useState(false)
+  const [testResult, setTestResult] = useState<ModelTestResult | null>(null)
+
+  const runModelTest = async (m: ModelItem, uid: string) => {
+    setTestBusy(true)
+    setTestResult(null)
+    try {
+      const { name } = splitID(m.id)
+      const r = await api<ModelTestResult>('models/test', {
+        method: 'POST',
+        body: { uid, model: name },
+      })
+      setTestResult(r)
+    } catch (e) {
+      setTestResult({ ok: false, error: errText(e) })
+    } finally {
+      setTestBusy(false)
+    }
+  }
 
   const loadModels = useCallback(async (force = false) => {
     setBusy(true)
@@ -523,6 +556,18 @@ export default function ModelsView(_props: ViewProps) {
                         </div>
                         <div className="id">{m.name || ''}</div>
                         {caps.length ? <div className="id" style={{ marginTop: 2 }}>{caps}</div> : null}
+                        <div className="id" style={{ marginTop: 4 }}>
+                          <button
+                            className="btn xs ghost"
+                            onClick={() => {
+                              setTesting(m)
+                              setTestResult(null)
+                              setTestUid('')
+                            }}
+                          >
+                            测试
+                          </button>
+                        </div>
                       </td>
                       <td className="num">{rateCell(m)}</td>
                       <td>
@@ -582,6 +627,78 @@ export default function ModelsView(_props: ViewProps) {
           </div>
         )}
       </Card>
+
+      {testing ? (
+        <div className="veil on" onClick={(e) => e.target === e.currentTarget && setTesting(null)}>
+          <div className="modal" style={{ maxWidth: 560 }}>
+            <h3>测试模型可用性</h3>
+            <div className="fld">
+              <span>模型</span>
+              <input readOnly value={testing.id} />
+            </div>
+            <div className="fld" style={{ marginTop: 8 }}>
+              <span>账号</span>
+              <select value={testUid} onChange={(e) => setTestUid(e.target.value)}>
+                <option value="">选择要测试的账号…</option>
+                {(ov?.accounts || [])
+                  .filter((a) => !a.disabled)
+                  .map((a) => (
+                    <option key={a.uid} value={a.uid}>
+                      {a.nickname || String(a.uid).slice(0, 10)}（{a.uid.slice(0, 8)} · {a.realm || '?'}）
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            {testResult ? (
+              <div
+                className="ck-secret-box"
+                style={{ marginTop: 12, background: 'var(--surface-2)', padding: '10px 12px', borderRadius: 8 }}
+              >
+                {testResult.ok ? (
+                  <>
+                    <div className="note ok" style={{ marginBottom: 6 }}>
+                      ✓ 可用 · {testResult.elapsed_ms ?? '—'}ms
+                      {testResult.model ? ` · 实际 ${testResult.model}` : ''}
+                    </div>
+                    {testResult.content ? (
+                      <div className="mono" style={{ fontSize: 12.5, whiteSpace: 'pre-wrap' }}>
+                        {testResult.content.slice(0, 300)}
+                      </div>
+                    ) : (
+                      <div className="dim">（空回复，但请求链路通）</div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div className="note err" style={{ marginBottom: 6 }}>
+                      ✗ 不可用{testResult.elapsed_ms != null ? ` · ${testResult.elapsed_ms}ms` : ''}
+                      {testResult.status ? ` · http ${testResult.status}` : ''}
+                      {testResult.kind ? ` · ${testResult.kind}` : ''}
+                    </div>
+                    <div className="mono" style={{ fontSize: 12.5, whiteSpace: 'pre-wrap' }}>
+                      {testResult.error || '未知错误'}
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : null}
+
+            <div className="row-actions" style={{ marginTop: 14, justifyContent: 'flex-end' }}>
+              <button className="btn ghost" onClick={() => setTesting(null)} disabled={testBusy}>
+                关闭
+              </button>
+              <button
+                className="btn primary"
+                disabled={!testUid || testBusy}
+                onClick={() => void runModelTest(testing, testUid)}
+              >
+                {testBusy ? '测试中…' : '测试'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </View>
   )
 }
