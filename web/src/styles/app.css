@@ -285,6 +285,19 @@
   user-select: all;
 }
 
+/* 列表里 Key 明文的展开态：可换行、可整体选中复制，避免长 key 撑爆表格。 */
+.ck-key {
+  font: 12.5px/1.5 var(--mono);
+  vertical-align: middle;
+}
+.ck-key-plain {
+  color: var(--ink);
+  word-break: break-all;
+  user-select: all;
+  display: inline-block;
+  max-width: 340px;
+}
+
 /* ── 配置与日志 ─────────────────────────────────────────── */
 .cfg-json {
   font: 12px/1.55 var(--mono);

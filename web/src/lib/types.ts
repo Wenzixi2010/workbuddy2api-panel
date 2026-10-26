@@ -108,6 +108,7 @@ export type ClientKey = {
   name: string
   remark: string
   key_hint: string
+  key?: string
   binds: string[]
   binds_all: boolean
   limits: { period: string; credits: number }

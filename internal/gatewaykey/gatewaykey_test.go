@@ -6,6 +6,7 @@ package gatewaykey
 // 后，若想用新 API 再换，不影响被测逻辑。
 
 import (
+	"encoding/json"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -62,13 +63,26 @@ func TestCreateAuthenticateLifecycle(t *testing.T) {
 		t.Fatalf("empty key err = %v, want ErrInvalid", err)
 	}
 
-	// 落盘的是摘要而不是明文：文件里不能出现明文。
+	// 落盘的是「摘要 + 明文存档」：key_hash 用于认证，key_plain 用于面板回显。
 	raw, rerr := ioutil.ReadFile(path)
 	if rerr != nil {
 		t.Fatalf("read file: %v", rerr)
 	}
-	if containsBytes(raw, []byte(plain)) {
-		t.Fatal("明文 key 出现在落盘文件里——只应保存 sha256 摘要")
+	if !containsBytes(raw, []byte(plain)) {
+		t.Fatal("明文 key 应存档（key_plain 字段），面板才能随时回显")
+	}
+	var recs []map[string]any
+	if err := json.Unmarshal(raw, &recs); err != nil {
+		t.Fatalf("parse file: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("recs = %d, want 1", len(recs))
+	}
+	if recs[0]["key_plain"] != plain {
+		t.Fatalf("key_plain = %v, want %q", recs[0]["key_plain"], plain)
+	}
+	if recs[0]["key_hash"] == "" || recs[0]["key_hash"] == plain {
+		t.Fatal("key_hash 应为 sha256 摘要而非明文")
 	}
 
 	// 重启后仍可认证（摘要稳定）。

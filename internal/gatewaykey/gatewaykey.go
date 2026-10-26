@@ -82,8 +82,12 @@ type Record struct {
 	Name    string `json:"name"`
 	Remark  string `json:"remark,omitempty"`
 	KeyHash string `json:"key_hash"`
-	// KeyHint 明文尾部 4 位，供列表辨认「是哪把 Key」（明文本身不再可取）。
+	// KeyHint 明文尾部 4 位，供列表辨认「是哪把 Key」。
 	KeyHint string `json:"key_hint"`
+	// KeyPlain 明文存档：面板「查看」随时回显用。认证仍走 KeyHash（sha256），
+	// 明文只用于管理面展示，不参与任何运行期比对。旧数据没有该字段 = 无法回显，
+	// 轮换一次后即有存档。
+	KeyPlain string `json:"key_plain,omitempty"`
 	// Binds 绑定的上游账号 uid 集合。非空 = 独占：本 Key 只用这些号，这些号也只服务
 	// 绑定了它们的 Key。
 	Binds []string `json:"binds,omitempty"`
@@ -107,6 +111,7 @@ type View struct {
 	Name     string   `json:"name"`
 	Remark   string   `json:"remark"`
 	KeyHint  string   `json:"key_hint"`
+	Key      string   `json:"key,omitempty"` // 明文（有存档时回显；旧数据无存档为空）
 	Binds    []string `json:"binds"`
 	BindsAll bool     `json:"binds_all"`
 	Limits   Limits   `json:"limits"`
@@ -558,6 +563,7 @@ func (s *Store) Create(in Input) (string, View, error) {
 		Remark:    remark,
 		KeyHash:   hashKey(plain),
 		KeyHint:   keyHint(plain),
+		KeyPlain:  plain,
 		Binds:     binds,
 		BindsAll:  all,
 		Limits:    limits,
@@ -710,13 +716,14 @@ func (s *Store) rotateWithPlain(id, plain string) (string, View, error) {
 		return "", View{}, errors.New("自定义 Key 与已有客户 Key 重复，请换一个")
 	}
 	r := &s.recs[idx]
-	prevHash, prevHint, prevUpdated := r.KeyHash, r.KeyHint, r.UpdatedAt
+	prevHash, prevHint, prevPlain, prevUpdated := r.KeyHash, r.KeyHint, r.KeyPlain, r.UpdatedAt
 	r.KeyHash = hashKey(plain)
 	r.KeyHint = keyHint(plain)
+	r.KeyPlain = plain
 	r.UpdatedAt = time.Now()
 	s.reindexLocked()
 	if err := s.saveLocked(); err != nil {
-		r.KeyHash, r.KeyHint, r.UpdatedAt = prevHash, prevHint, prevUpdated
+		r.KeyHash, r.KeyHint, r.KeyPlain, r.UpdatedAt = prevHash, prevHint, prevPlain, prevUpdated
 		s.reindexLocked()
 		return "", View{}, fmt.Errorf("保存客户 Key 失败: %w", err)
 	}
@@ -764,6 +771,7 @@ func (s *Store) viewLocked(r *Record) View {
 		Name:           r.Name,
 		Remark:         r.Remark,
 		KeyHint:        r.KeyHint,
+		Key:            r.KeyPlain,
 		Binds:          append([]string{}, r.Binds...),
 		BindsAll:       r.BindsAll,
 		Limits:         r.Limits,

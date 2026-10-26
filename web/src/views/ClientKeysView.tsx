@@ -34,7 +34,7 @@ export default function ClientKeysView({ onToast }: ViewProps) {
   const [err, setErr] = useState('')
   const [bindable, setBindable] = useState<BindableAccount[]>([])
   const [editing, setEditing] = useState<ClientKey | null | 'new'>(null)
-  const [viewing, setViewing] = useState<{ name: string; key: string } | null>(null)
+  const [revealed, setRevealed] = useState<Record<string, boolean>>({})
 
   const load = useCallback(async () => {
     try {
@@ -67,21 +67,9 @@ export default function ClientKeysView({ onToast }: ViewProps) {
     }
   }
 
-  // 查看明文：后端只存 sha256，旧明文永远取不回，所以「查看」= 轮换到一把新 Key
-  // 并当场展示（旧 key 立即失效）。这一步必须说清楚，否则用户以为能看到旧值。
-  const viewKey = async (k: ClientKey) => {
-    if (!confirm(`「${k.name}」的明文只存摘要、无法回显。\n\n点「查看」会轮换到一把新 Key（旧 key 立刻失效），并当场展示新明文。\n\n继续？`)) {
-      return
-    }
-    try {
-      const d = await api<{ key?: string }>(`client_keys/${encodeURIComponent(k.id)}/rotate`, {
-        method: 'POST',
-      })
-      setViewing({ name: k.name, key: d.key || '' })
-      void load()
-    } catch (e) {
-      onToast(`查看失败：${errText(e)}`, 'err')
-    }
+  // 切换某把 Key 明文的显示/隐藏（明文存档在 key 字段，随时可看）。
+  const toggleReveal = (id: string) => {
+    setRevealed((r) => ({ ...r, [id]: !r[id] }))
   }
 
   if (err && !data) return <View><div className="empty err">读取失败：{err}</div></View>
@@ -168,15 +156,25 @@ export default function ClientKeysView({ onToast }: ViewProps) {
                     <div className="ck-name">{k.name}</div>
                     {k.remark ? <div className="ck-remark">{k.remark}</div> : null}
                   </td>
-                  <td className="mono dim">
-                    <span className="ck-key">••••{k.key_hint}</span>
-                    <button
-                      className="btn xs ghost"
-                      title="明文只在轮换时返回一次；查看 = 轮换到一把新 Key"
-                      onClick={() => void viewKey(k)}
-                    >
-                      查看
-                    </button>
+                  <td className="mono">
+                    {revealed[k.id] && k.key ? (
+                      <span className="ck-key ck-key-plain">{k.key}</span>
+                    ) : (
+                      <span className="ck-key">••••{k.key_hint}</span>
+                    )}
+                    {k.key ? (
+                      <button
+                        className="btn xs ghost"
+                        title={revealed[k.id] ? '隐藏明文' : '显示明文'}
+                        onClick={() => toggleReveal(k.id)}
+                      >
+                        {revealed[k.id] ? '隐藏' : '显示'}
+                      </button>
+                    ) : (
+                      <span className="dim" title="旧 Key 无明文存档，轮换一次后即可查看">
+                        （无存档）
+                      </span>
+                    )}
                   </td>
                   <td>
                     {k.binds.length === 0 ? (
@@ -265,34 +263,6 @@ export default function ClientKeysView({ onToast }: ViewProps) {
           }}
           onToast={onToast}
         />
-      ) : null}
-
-      {viewing ? (
-        <div className="veil on" onClick={(e) => e.target === e.currentTarget && setViewing(null)}>
-          <div className="modal" style={{ maxWidth: 520 }}>
-            <h3>查看密钥「{viewing.name}」</h3>
-            <div className="ck-secret-box">
-              <div className="note warn" style={{ marginBottom: 8 }}>
-                这是唯一一次显示明文；关掉就再也看不到（旧 Key 已失效，当前以下面这把为准）。
-              </div>
-              <div className="ck-secret">{viewing.key}</div>
-              <div className="row-actions" style={{ marginTop: 12, justifyContent: 'flex-end' }}>
-                <button
-                  className="btn sm ghost"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(viewing.key)
-                    onToast('已复制', 'ok')
-                  }}
-                >
-                  复制
-                </button>
-                <button className="btn sm primary" onClick={() => setViewing(null)}>
-                  我已保存好
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       ) : null}
     </View>
   )
