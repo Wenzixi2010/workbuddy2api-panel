@@ -477,10 +477,22 @@ func (p *Pool) CapacityForModel(model, realm string) (modelAvailable, poolAvaila
 // 这是粘性能"换得动"的关键：绑定只记 uid，若只按账号级 healthy 校验，
 // 被模型级限额的号（账号整体仍健康）会被持续选中直到轮换次数耗尽。
 func (p *Pool) PickByUIDForModel(uid, model string) *auth.Auth {
+	return p.PickByUIDForModelFiltered(uid, model, PickFilter{})
+}
+
+// PickByUIDForModelFiltered 同 PickByUIDForModel，并叠加客户 Key 的账号范围约束。
+//
+// 为什么粘性路径也要过滤：粘性绑定只记 uid，与「这把 Key 能用哪些号」是两套独立
+// 的约束。不复核的话，会话粘性会把一个白名单外的号（或别人独占的号）钉在这条
+// Key 的请求上——绑定语义被粘性绕开了，且现象只在「这个会话之前用过这个号」时出现。
+func (p *Pool) PickByUIDForModelFiltered(uid, model string, filter PickFilter) *auth.Auth {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	e, ok := p.byUID[uid]
 	if !ok {
+		return nil
+	}
+	if !filter.empty() && !filterAllows(filter, uid) {
 		return nil
 	}
 	now := time.Now()

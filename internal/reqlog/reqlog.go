@@ -84,6 +84,9 @@ type Event struct {
 	CacheMissTokens int64  `json:"cache_miss_tokens,omitempty"`
 	ClientIP        string `json:"client_ip,omitempty"`
 	UserAgent       string `json:"user_agent,omitempty"`
+	// ClientKey 调用方客户 Key 的名称/id（主密钥为空）。只存标识，不存明文——
+	// 归档的事后问题是「这条请求是谁打的」，不是「他的 key 是什么」。
+	ClientKey       string `json:"client_key,omitempty"`
 	Mode            string `json:"mode,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	ReasoningTokens int64  `json:"reasoning_tokens,omitempty"`
@@ -99,6 +102,8 @@ type Filter struct {
 	Model     string
 	ClientIP  string
 	UserAgent string
+	// ClientKey 按客户 Key 名称/id 子串筛（主密钥请求该字段为空）。
+	ClientKey string
 	From      time.Time
 	To        time.Time
 }
@@ -657,6 +662,9 @@ func (f Filter) match(e Event) bool {
 		return false
 	}
 	if !containsFold(e.UserAgent, f.UserAgent) {
+		return false
+	}
+	if !containsFold(e.ClientKey, f.ClientKey) {
 		return false
 	}
 	if !f.From.IsZero() && e.Time.Before(f.From) {

@@ -26,6 +26,18 @@ type Snapshot struct {
 	// 的等价模型（裸名 → 裸名）。nil = 不降级。与 aliases 的区别：aliases 是
 	// 「客户端名→真实名」的静态映射，本表是「限流时的临时改道」，且不写持久状态。
 	ModelFallback map[string]string
+	// ClientKeysEnabled 是否启用客户 API Key（config.client_keys.enabled）。
+	// 面板新建/编辑 Key、网关认证都看这一项：关闭时面板不暴露管理入口，
+	// 已签发的 Key 也不再被认证（回到「只有主密钥」的旧行为）。
+	// 热生效：面板保存配置后下一个请求即用新快照。
+	ClientKeysEnabled bool
+	// PanelUser / PanelPass 面板登录账号（config.panel_auth）。
+	// 面板鉴权与网关 api_key 已经完全分开：这两个字段只给 /panel/* 用。
+	// 热生效——面板里改完密码，下一个登录请求即用新值。
+	PanelUser string
+	PanelPass string
+	// PanelSessionHours 面板会话有效期（小时）；<=0 由调用方回退默认。
+	PanelSessionHours int
 }
 
 // NormalizeModelAliases 把用户配置的 aliases 条目（"客户端名=真实模型名"）归一化为查找表。

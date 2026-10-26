@@ -442,6 +442,9 @@ type requestTrace struct {
 	// 调用来源，进入 handler 时一次性采集（见 ServeHTTP / captureClientInfo）。
 	clientIP  string
 	userAgent string
+	// clientKey 调用方客户 Key 的名称/id（主密钥为空）。在 ServeHTTP 入口取——
+	// 身份是认证阶段放进 context 的，只有入口那一层保证「已经过 withAuth」。
+	clientKey string
 }
 
 // captureClientInfo 采集调用来源（客户端 IP + 截断后的 UA）。开关关闭时保持空串：
@@ -525,6 +528,7 @@ func (t *requestTrace) event(status int) reqlog.Event {
 	}
 	e.ClientIP = t.clientIP
 	e.UserAgent = t.userAgent
+	e.ClientKey = t.clientKey
 	e.ExecutorType = deriveExecutorType(t.userAgent)
 	if e.Outcome == "" {
 		if status >= 200 && status < 300 {

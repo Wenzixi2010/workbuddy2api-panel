@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/misakano7545/workbuddy2api-panel/internal/auth"
-	"github.com/misakano7545/workbuddy2api-panel/internal/httpauth"
+	"github.com/misakano7545/workbuddy2api-panel/internal/gatewaykey"
 	"github.com/misakano7545/workbuddy2api-panel/internal/livecfg"
 	"github.com/misakano7545/workbuddy2api-panel/internal/logfmt"
 	"github.com/misakano7545/workbuddy2api-panel/internal/pool"
@@ -100,6 +100,11 @@ type Config struct {
 	// 来自 logging.request_client_info（缺省 true）；关闭时 reqlog 事件的来源字段
 	// 保持为空，归档与面板都不出现来源信息。
 	RecordClientInfo bool
+
+	// ClientKeys 客户 API Key 存储（可选；nil = 未启用，只有主密钥可用）。
+	// 是否真正生效还要看 livecfg.ClientKeysEnabled（config client_keys.enabled）：
+	// 两者同时满足才在认证路径上起作用——面板关掉开关就等于收回全部客户 Key。
+	ClientKeys *gatewaykey.Store
 }
 
 // loadLive 返回当前运行期快照；Live 为 nil 时用静态字段合成。
@@ -252,6 +257,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if status == 0 {
 				status = http.StatusOK
 			}
+			// 客户 Key 身份在认证阶段才写进 context，故在出口这一刻取：
+			// 入口时 Authorization 还没被 withAuth 解析，早取永远是空。
+			trace.clientKey = clientKeyLabel(r)
 			h.cfg.RequestLog.Record(trace.event(status))
 		}()
 		h.mux.ServeHTTP(obs, r)
@@ -260,13 +268,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.mux.ServeHTTP(w, r)
 }
 
+// withAuth 网关侧统一鉴权：主密钥 或 客户 Key（clientkey.go）都放行。
+//
+// 与旧实现的差别只在「客户 Key 也算合法凭证」：主密钥的既有行为一字未改
+// （空 key = 不鉴权、常量时间比较、401 形状）。被停用的客户 Key 回 401 但带明确
+// 原因——「已停用」和「无效 Key」是两种完全不同的处置（前者找管理员，后者找自己抄错）。
 func (h *Handler) withAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !httpauth.VerifyBearer(r, h.loadLive().APIKey) {
-			writeOpenAIError(w, http.StatusUnauthorized, "invalid_api_key", "missing or invalid API key")
+		r2, why := h.authorizedClient(r)
+		if why != "" {
+			code := "invalid_api_key"
+			if strings.HasPrefix(why, "client key disabled") {
+				code = "client_key_disabled"
+			}
+			writeOpenAIError(w, http.StatusUnauthorized, code, why)
 			return
 		}
-		next(w, r)
+		next(w, r2)
 	}
 }
 
@@ -344,15 +362,58 @@ func (h *Handler) status(w http.ResponseWriter, r *http.Request) {
 			"last_reject": budgetLastReject,
 			"day":         cstDay(time.Now()),
 		},
+		// client_key 当前调用方的客户 Key 额度快照（主密钥为 null）。只描述「你这一把」
+		// 的剩余量：多把 Key 的明细在面板，网关端点不该向任意 Key 泄露同池其他 Key 的用量。
+		"client_key": h.clientKeyStatus(r),
 	})
+}
+
+// clientKeyStatus /status 里的调用方额度快照；主密钥/未启用时返回 nil（JSON null）。
+//
+// 为什么只给「自己这一把」：/status 是所有 Key 都能调的端点，把全池 Key 明细放进来
+// 等于让任意一个客户 Key 看到别的客户用了多少额度。这里只回自己的剩余量与周期。
+func (h *Handler) clientKeyStatus(r *http.Request) any {
+	id := identityFrom(r)
+	if id == nil || id.entry == nil {
+		return nil
+	}
+	e := id.entry
+	lim := e.Limits()
+	period := string(lim.Period)
+	if period == "" {
+		period = "none"
+	}
+	return map[string]any{
+		"id":             e.ID(),
+		"name":           e.Name(),
+		"limit_period":   period,
+		"limit_credits":  lim.Credits,
+		"used":           e.Used(),
+		"remaining":      e.Remaining(), // -1 = 不限额
+		"exhausted":      e.Exhausted(),
+		"bound_accounts": len(e.Binds()),
+	}
 }
 
 func (h *Handler) capacity(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	// 这里用 authorizedClient 而不是单纯看主密钥：客户 Key 是合法调用方，
+	// 若只认主密钥，客户 Key 调容量端点会拿到「API key is required」——与它
+	// 能正常打 /v1/chat/completions 的事实自相矛盾，客户端会去怀疑 key 配错了。
+	//
+	// 但「未配置 api_key」必须继续拒绝：authorizedClient 走的是网关鉴权口径，
+	// 空主密钥在那里是「未启用鉴权 → 放行」（/v1/chat 就是这么工作的），而容量
+	// 端点的既有契约是「没配 key 就不给看容量」。这一条先判，语义才不被改写。
 	if strings.TrimSpace(h.loadLive().APIKey) == "" {
 		writeOpenAIError(w, http.StatusUnauthorized, "authentication_error", "API key is required")
 		return
 	}
+	r2, why := h.authorizedClient(r)
+	if why != "" {
+		writeOpenAIError(w, http.StatusUnauthorized, "authentication_error", why)
+		return
+	}
+	r = r2
 	model := strings.TrimSpace(r.URL.Query().Get("model"))
 	if model == "" {
 		writeOpenAIError(w, http.StatusBadRequest, "invalid_request_error", "model is required")
@@ -703,6 +764,13 @@ func cachedModelsSnapshot() []upstream.ModelInfo {
 }
 
 func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
+	// 客户 Key 额度闸（clientkey.go）：先于全局预算闸——一把 Key 用尽时不该再消耗
+	// 进程级预算的判定，也不该让「全局还有量」掩盖「这把 Key 已经用完」。
+	// 429 与全局预算同码族，但 code/message 指明是 client key 而非当日预算。
+	if stopped, why := h.clientKeyExhausted(r); stopped {
+		writeOpenAIError(w, http.StatusTooManyRequests, "client_key_quota_exceeded", why)
+		return
+	}
 	if ok, why := h.budget.admit(); !ok {
 		used, limit, _, _ := h.budget.snapshot()
 		code, msg := "daily_budget_exceeded", fmt.Sprintf(
@@ -834,6 +902,12 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 	defer st.done()
 
+	// 客户 Key 的账号范围（clientkey.go）：绑定型 Key 只从绑定号里选；未绑定流量
+	// 避开被独占的号。零值 = 主密钥/未启用客户 Key，池行为与旧版完全一致。
+	// 在轮转循环**外**取一次：一次请求内绑定额不会变，逐轮重复取只是白拷贝。
+	keyFilter := h.clientKeyFilter(r)
+	h.clientKeyQuotaHeaders(w, r)
+
 	// models.hidden 黑名单：点名调用直接拒绝，不打上游、不占选号。
 	// 与 /v1/models 的列表过滤对称（只藏列表不够，知道名字仍可硬调）。
 	if h.hiddenModel(realm, bareModel) {
@@ -956,6 +1030,11 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		}
 		h.cfg.Pool.RecordTokenUsage(uid, delta)
 
+		// 客户 Key 额度记账（clientkey.go）：只吃上游实测 usage.credit，未知不扣。
+		// 放在这里而不是请求出口：一次请求可能多轮换号（每轮各有 usage），
+		// 出口只看到最后一轮的 credit，会把前几轮的花费漏记成「免费」。
+		h.recordClientKeyUsage(r, credit, hasCredit)
+
 		// 用量时序记录。ok 以「上游是否给了 usage」判定：空 delta 意味着这次尝试
 		// 没拿到任何 token 统计（传输错误 / >=400 / 解析失败），计为失败尝试。
 		// 失败也计入请求数——否则重试放大在「用量」视图里看不见。
@@ -1051,18 +1130,21 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 		// 选号：粘性号优先（PickByUIDForModel 已校验该模型可用性 + 在途未满），否则普通轮换。
 		var acct *auth.Auth
 		if stickyUID != "" {
-			acct = h.cfg.Pool.PickByUIDForModel(stickyUID, curModel)
+			// 客户 Key 的账号范围同样约束粘性号（keyFilter）：粘性绑定只记 uid，
+			// 不复核的话，白名单外的号会被会话粘性一路钉在这把 Key 的请求上。
+			acct = h.cfg.Pool.PickByUIDForModelFiltered(stickyUID, curModel, keyFilter)
 			if acct == nil || (realm != "" && acct.Realm() != realm) {
-				// 粘性号在当前模型不可用（冷却/占满/该模型被 6004 限额）或 realm 不符 → 解绑，
-				// 本次回落普通轮换。
+				// 粘性号在当前模型不可用（冷却/占满/该模型被 6004 限额）、realm 不符
+				// 或不在本 Key 的账号范围内 → 解绑，本次回落普通轮换。
 				unbindSticky()
 				acct = nil
 			}
 		}
 		if acct == nil {
 			// 模型感知 + realm 感知选号：模型非空时启用 6004 模型级冷却豁免
-			// （healthyForModel），realm 谓词过滤跨域账号。
-			acct = h.cfg.Pool.PickExcludingForRealm(tried, curModel, realm)
+			// （healthyForModel），realm 谓词过滤跨域账号，keyFilter 叠加客户 Key 的
+			// 账号白名单 / 他人独占排除（零值 = 不施加约束）。
+			acct = h.cfg.Pool.PickExcludingForRealmFiltered(tried, curModel, realm, keyFilter)
 		}
 		if acct == nil {
 			// ⭐ 模型降级兜底（20261021 补的真实缺口）：全池该模型都处于 6004 冷却时，
@@ -1103,6 +1185,15 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 			// 在这里取一次快照，供下方错误构造区分；按 realm 统计，否则另一域的
 			// 健康号会把「本域全被模型级冷却挡住」掩盖成还有号可服务。
 			modelBlock = h.cfg.Pool.ModelBlockedForRealm(curModel, realm)
+			// 客户 Key 专属的第三种成因：号可能都是好的，只是**不在这把 Key 的范围内**
+			// （绑定的号全冷却/被停用，或未绑定流量而全池都被其他 Key 独占）。
+			// 若不单独说清，绑定型 Key 的用户会看到「no healthy account」并去怀疑账号池。
+			if bound := h.clientKeyBoundDesc(r); bound != "" && !modelBlock.Blocked {
+				st.outcome = reqlog.OutcomeHTTPError
+				writeOpenAIErrorHint(w, http.StatusServiceUnavailable, "client_key_no_account",
+					bound+"（检查账号状态，或为该 Key 追加绑定额度更健康的账号）", "")
+				break
+			}
 			break
 		}
 		st.uid = acct.UID
