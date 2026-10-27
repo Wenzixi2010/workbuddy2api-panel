@@ -1,9 +1,12 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { errText } from '../lib/format'
 import type { Group, GroupsResp } from '../lib/types'
 import { Card, Stat, Stats, View } from '../components/Layout'
 import type { ViewProps } from './types'
+
+/** 模型目录条目（/panel/api/models 的 models[] 里取 id/name 即可）。 */
+type ModelOption = { id: string; name?: string }
 
 /** 分组：客户 Key 的模型白名单。key 归属分组后只能调用分组允许的模型。 */
 export default function GroupsView({ onToast }: ViewProps) {
@@ -11,8 +14,10 @@ export default function GroupsView({ onToast }: ViewProps) {
   const [err, setErr] = useState('')
   const [editing, setEditing] = useState<Group | null | 'new'>(null)
   const [name, setName] = useState('')
-  const [modelsText, setModelsText] = useState('')
+  const [models, setModels] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
+  // 模型目录（下拉多选的数据源）。
+  const [catalog, setCatalog] = useState<ModelOption[]>([])
 
   const load = useCallback(async () => {
     try {
@@ -26,12 +31,16 @@ export default function GroupsView({ onToast }: ViewProps) {
 
   useEffect(() => {
     void load()
+    // 模型目录：下拉多选的数据源；取不到不阻塞分组管理（下拉退化为空）。
+    api<{ models?: ModelOption[] }>('models')
+      .then((d) => setCatalog(d.models || []))
+      .catch(() => setCatalog([]))
   }, [load])
 
   const openEditor = (g: Group | null) => {
     setEditing(g ?? 'new')
     setName(g?.name || '')
-    setModelsText(g ? (g.models || []).join('\n') : '')
+    setModels(g ? (g.models || []).slice() : [])
   }
 
   const submit = async () => {
@@ -39,10 +48,6 @@ export default function GroupsView({ onToast }: ViewProps) {
       onToast('分组名称不能为空', 'err')
       return
     }
-    const models = modelsText
-      .split('\n')
-      .map((s) => s.trim())
-      .filter(Boolean)
     setBusy(true)
     try {
       if (editing === 'new') {
@@ -179,15 +184,13 @@ export default function GroupsView({ onToast }: ViewProps) {
             <div className="fld" style={{ marginTop: 10 }}>
               <span>
                 模型白名单（可选）
-                <span className="dim"> 每行一个模型名；留空 = 不限制（全放行）</span>
+                <span className="dim"> 下拉多选；留空 = 不限制（全放行）</span>
               </span>
-              <textarea
-                rows={8}
-                value={modelsText}
-                onChange={(e) => setModelsText(e.target.value)}
-                placeholder={'cn:glm-5.2\ncn:deepseek-v4\nglobal:claude-x\n（裸名跨域匹配，也可写 realm:name）'}
-                spellCheck={false}
-                style={{ fontFamily: 'var(--mono)', fontSize: 12.5 }}
+              <ModelMultiSelect
+                options={catalog}
+                value={models}
+                onChange={setModels}
+                placeholder="搜索并选择模型…"
               />
             </div>
             <div className="note" style={{ marginTop: 8, fontSize: 12 }}>
@@ -205,5 +208,127 @@ export default function GroupsView({ onToast }: ViewProps) {
         </div>
       ) : null}
     </View>
+  )
+}
+
+/** 可搜索多选下拉：点开面板 → 搜索 → 勾选模型（id 为 value）。 */
+function ModelMultiSelect({
+  options,
+  value,
+  onChange,
+  placeholder,
+}: {
+  options: ModelOption[]
+  value: string[]
+  onChange: (v: string[]) => void
+  placeholder: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+  const boxRef = useRef<HTMLDivElement>(null)
+
+  // 已选里的 id 若不在当前目录（如已下架模型），也保留展示，不丢。
+  const filtered = useMemo(() => {
+    const kw = q.trim().toLowerCase()
+    const list = kw
+      ? options.filter((o) => o.id.toLowerCase().includes(kw) || (o.name || '').toLowerCase().includes(kw))
+      : options
+    return list
+  }, [options, q])
+
+  const toggle = (id: string) => {
+    onChange(value.includes(id) ? value.filter((x) => x !== id) : [...value, id])
+  }
+
+  const removeTag = (id: string) => onChange(value.filter((x) => x !== id))
+
+  // 点击外部关闭。
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [open])
+
+  const byId = (id: string) => options.find((o) => o.id === id)
+
+  return (
+    <div className="msel" ref={boxRef}>
+      <div
+        className={'msel-box' + (open ? ' open' : '')}
+        onClick={() => {
+          setOpen(!open)
+          setQ('')
+        }}
+      >
+        {value.length === 0 ? (
+          <span className="msel-ph">{placeholder}</span>
+        ) : (
+          <span className="msel-tags">
+            {value.map((id) => (
+              <span className="msel-tag" key={id}>
+                {byId(id)?.id || id}
+                <button
+                  type="button"
+                  className="msel-x"
+                  title="移除"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    removeTag(id)
+                  }}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </span>
+        )}
+        <span className="msel-arrow">▾</span>
+      </div>
+
+      {open ? (
+        <div className="msel-panel">
+          <input
+            className="msel-q"
+            value={q}
+            autoFocus
+            placeholder="搜索模型（id / 名称）…"
+            onChange={(e) => setQ(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+          />
+          <div className="msel-list">
+            {filtered.length === 0 ? (
+              <div className="msel-empty">没有匹配的模型</div>
+            ) : (
+              filtered.map((o) => {
+                const checked = value.includes(o.id)
+                return (
+                  <label className="msel-item" key={o.id}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggle(o.id)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                    <span className="msel-id mono">{o.id}</span>
+                    {o.name ? <span className="msel-name">{o.name}</span> : null}
+                  </label>
+                )
+              })
+            )}
+          </div>
+          {value.length > 0 ? (
+            <div className="msel-foot">
+              <span className="dim">已选 {value.length} 个</span>
+              <button className="btn xs ghost" onClick={() => onChange([])}>
+                清空
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   )
 }

@@ -332,6 +332,89 @@
   user-select: all;
 }
 
+/* 可搜索多选下拉（分组模型白名单）。 */
+.msel { position: relative; }
+.msel-box {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  cursor: pointer;
+  flex-wrap: wrap;
+}
+.msel-box.open { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); }
+.msel-ph { color: var(--ink-3); font-size: 13px; }
+.msel-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; flex: 1; }
+.msel-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  font: 11.5px/1.5 var(--mono);
+  color: var(--ink);
+}
+.msel-x {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--ink-3);
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 1px;
+}
+.msel-x:hover { color: var(--danger); }
+.msel-arrow { color: var(--ink-3); font-size: 11px; margin-left: auto; }
+.msel-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 30;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  overflow: hidden;
+}
+.msel-q {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 9px 10px;
+  font-size: 13px;
+  background: var(--surface);
+  outline: none;
+}
+.msel-list { max-height: 240px; overflow-y: auto; }
+.msel-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.msel-item:hover { background: var(--surface-2); }
+.msel-item input { margin: 0; }
+.msel-id { font-size: 12px; color: var(--ink); }
+.msel-name { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msel-empty { padding: 14px 10px; text-align: center; color: var(--ink-3); font-size: 12.5px; }
+.msel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+}
+
 /* ── 配置与日志 ─────────────────────────────────────────── */
 .cfg-json {
   font: 12px/1.55 var(--mono);
