@@ -114,6 +114,84 @@ const SCHEDULE_FIELDS: ScheduleFieldDef[] = [
 
 const MANAGED_TIP = '此项由启动环境变量设置，请在部署配置中修改。'
 
+/** 服务 / 账号池与流量治理 / 上游与高级 / 日志 的字段定义（与旧版 CFG_MAP 同款）。 */
+type CfgFieldDef = {
+  key: string
+  label: string
+  type: 'text' | 'num' | 'bool' | 'select'
+  placeholder?: string
+  hint?: string
+  options?: { value: string; label: string }[]
+  /** 需重启进程才能生效的提示。 */
+  restart?: boolean
+}
+
+const SERVICE_FIELDS: CfgFieldDef[] = [
+  { key: 'listen', label: '监听地址', type: 'text', placeholder: ':7863', hint: '改动需重启进程' },
+  { key: 'api_key', label: 'API 密钥', type: 'text', placeholder: '留空 = 不鉴权', hint: '立即生效（含面板自身）' },
+  { key: 'package_detail_limit', label: '单账号明细默认展示条数', type: 'num', placeholder: '5', hint: '积分构成页按最早到期展示，其余未用完包聚合' },
+  { key: 'poll_interval_sec', label: '面板自动刷新间隔（秒）', type: 'num', placeholder: '0', hint: '0 = 缺省 5 秒；负数 = 关闭自动刷新（仅手动更新）' },
+]
+
+const POOL_FIELDS: CfgFieldDef[] = [
+  { key: 'max_in_flight', label: '单账号最大在途', type: 'num', placeholder: '3', hint: '0 = 不限制' },
+  { key: 'max_in_flight_global', label: '国际版在途上限', type: 'num', placeholder: '2', hint: 'global 域风控更紧，默认 2' },
+  { key: 'breaker_threshold', label: '连续失败熔断阈值', type: 'num', placeholder: '3' },
+  { key: 'soft_rate', label: '软限流冷却基数', type: 'text', placeholder: '600s' },
+  { key: 'soft_rate_max', label: '软冷却退避上限', type: 'text', placeholder: '2h' },
+  { key: 'breaker_cooldown', label: '熔断基础时长', type: 'text', placeholder: '30m' },
+  { key: 'breaker_cooldown_max', label: '熔断退避上限', type: 'text', placeholder: '6h' },
+  { key: 'degrade_threshold', label: '连败降权阈值', type: 'num', placeholder: '5', hint: '未知错误连败 N 次临时出池' },
+  { key: 'degrade_cooldown', label: '连败降权时长', type: 'text', placeholder: '10m' },
+  { key: 'degrade_cooldown_max', label: '连败降权上限', type: 'text', placeholder: '2h' },
+  { key: 'idle_weight_per_hour', label: '闲置补偿 / 小时', type: 'num', placeholder: '0.5' },
+  { key: 'idle_weight_max', label: '闲置补偿上限', type: 'num', placeholder: '5' },
+  { key: 'cost_explore_interval', label: '成本探索窗口', type: 'text', placeholder: '30m', hint: '垄断破除：免费层垄断时定期搭车探索未知号；0 关停' },
+  { key: 'credit_floor', label: '积分保底', type: 'num', placeholder: '100', hint: '余额低于此值不再接实测收费模型（保住免费模型可用）；0 关闭' },
+  { key: 'credit_floor_max_rate', label: '保底倍率上限', type: 'num', placeholder: '0', hint: '无实测账本时，目录倍率 ≤ 此值才放行；0 = 任何已知收费倍率都拦' },
+  { key: 'expiring_soon', label: '快过期路由窗口', type: 'text', placeholder: '168h', hint: '窗口内有快过期批次的账号选号权重 ×3；0 关闭' },
+  { key: 'ttl', label: '会话粘性 TTL', type: 'text', placeholder: '30m', hint: '改动需重启进程' },
+  { key: 'reserve_credits', label: '保留积分', type: 'num', placeholder: '10', hint: '余额低于该值的账号停止接单（0 = 关闭，缺省 10）' },
+]
+
+const POOL_SWITCHES: CfgFieldDef[] = [{ key: 'prefer_expiring', label: '快过期积分优先', type: 'bool' }]
+
+const UPSTREAM_FIELDS: CfgFieldDef[] = [
+  { key: 'timeout_seconds', label: '短请求超时', type: 'num', placeholder: '120', hint: '需重启', restart: true },
+  { key: 'header_timeout_seconds', label: '聊天首字节超时', type: 'num', placeholder: '120', hint: '需重启', restart: true },
+  { key: 'idle_timeout_seconds', label: '流空闲超时', type: 'num', placeholder: '300', hint: '需重启', restart: true },
+  { key: 'user_agent', label: '出站 User-Agent', type: 'text', placeholder: '留空 = CLI/2.63.2 CodeBuddy/2.63.2', hint: '影响官网积分记录「使用端」显示；需重启', restart: true },
+  { key: 'models_hidden', label: '模型黑名单', type: 'text', placeholder: 'deepseek-pro, cn:legacy-model', hint: '逗号分隔；裸名隐藏两域，cn: / global: 只隐藏该域；保存即热生效' },
+  { key: 'models_allowed', label: '模型白名单', type: 'text', placeholder: 'glm-5.2, global:gpt-5.4', hint: '逗号/空白分隔；空 = 不启用（默认全部放行）；清空即关闭白名单，保存即热生效' },
+  { key: 'models_aliases', label: '模型映射', type: 'text', placeholder: 'claude-opus-4=glm-5.2, gpt-5=global:gpt-5.4', hint: '逗号分隔的「客户端名=真实模型名」；目标仍受黑名单约束，保存即热生效' },
+  {
+    key: 'prompt_mode', label: '系统提示词模式', type: 'select', hint: '需重启', restart: true,
+    options: [
+      { value: 'custom', label: 'custom — 网关自有提示词（避免指纹误报）' },
+      { value: 'append', label: 'append — 客户端 system 后插网关提示词（并用）' },
+      { value: 'passthrough', label: 'passthrough — 透传客户端原始 system' },
+    ],
+  },
+  { key: 'prompt_file', label: '提示词文件路径', type: 'text', placeholder: '留空 = 内置默认提示词', hint: '需重启', restart: true },
+  {
+    key: 'sanitize_brand_scope', label: '品牌词规则作用域', type: 'select',
+    hint: '指纹脱敏总开关打开时生效。all 会改写 user / assistant / tool 历史里的同名文本；identity 只改身份消息。',
+    options: [
+      { value: 'all', label: 'all — 所有消息角色（默认，与上游一致）' },
+      { value: 'identity', label: 'identity — 仅 system / developer' },
+    ],
+  },
+]
+
+const UPSTREAM_SWITCHES: CfgFieldDef[] = [
+  { key: 'sanitize_blacklist_fingerprints', label: '出站请求指纹脱敏', type: 'bool' },
+  { key: 'session_sticky_enabled', label: '会话粘性路由', type: 'bool' },
+]
+
+const LOG_SWITCHES: CfgFieldDef[] = [
+  { key: 'request_client_info', label: '记录调用来源（客户端 IP / User-Agent）', type: 'bool' },
+]
+
 export default function ConfigView({ onToast }: ViewProps) {
   const [d, setD] = useState<ConfigResp | null>(null)
   const [err, setErr] = useState('')
@@ -127,6 +205,11 @@ export default function ConfigView({ onToast }: ViewProps) {
   const [scheduleVals, setScheduleVals] = useState<Record<string, string>>({})
   const [scheduleSaving, setScheduleSaving] = useState(false)
   const [scheduleRestart, setScheduleRestart] = useState<string[]>([])
+  // 旧版结构化表单（服务 / 账号池与流量治理 / 上游与高级 / 日志）的字符串值。
+  // checkbox 用 '1'/'0' 记；其余存原始文本，空 = 不下发（沿用现值）。
+  const [formVals, setFormVals] = useState<Record<string, string>>({})
+  const [formSaving, setFormSaving] = useState(false)
+  const [formRestart, setFormRestart] = useState<string[]>([])
   // 用户是否动过编辑器。用 ref 而不是 state：load() 里要读它的最新值，
   // 用 state 会闭包到旧值，导致"正在编辑时被轮询覆盖"。
   const touchedRef = useRef(false)
@@ -150,6 +233,17 @@ export default function ConfigView({ onToast }: ViewProps) {
         next[f.key] = scheduleValToString(sc[f.key])
       }
       setScheduleVals(next)
+      // 回填结构化表单（服务 / 账号池 / 上游 / 日志）：从 config 对象读现值。
+      const c = r.config || {}
+      const fv: Record<string, string> = {}
+      for (const f of [...SERVICE_FIELDS, ...POOL_FIELDS, ...POOL_SWITCHES, ...UPSTREAM_FIELDS, ...UPSTREAM_SWITCHES, ...LOG_SWITCHES]) {
+        const v = (c as Record<string, unknown>)[f.key]
+        if (f.type === 'bool') fv[f.key] = v ? '1' : '0'
+        else if (v === null || v === undefined) fv[f.key] = ''
+        else if (Array.isArray(v)) fv[f.key] = v.join(', ')
+        else fv[f.key] = String(v)
+      }
+      setFormVals(fv)
       setErr('')
     } catch (e) {
       setErr(errText(e))
@@ -257,6 +351,52 @@ export default function ConfigView({ onToast }: ViewProps) {
     }
   }
 
+  /** 收集结构化表单 → 顶层补丁对象（与旧版 collectConfig 同口径：空 = 不下发）。 */
+  const collectForm = (): Record<string, unknown> => {
+    const out: Record<string, unknown> = {}
+    for (const f of [...SERVICE_FIELDS, ...POOL_FIELDS, ...POOL_SWITCHES, ...UPSTREAM_FIELDS, ...UPSTREAM_SWITCHES, ...LOG_SWITCHES]) {
+      const raw = (formVals[f.key] ?? '').trim()
+      if (f.type === 'bool') out[f.key] = raw === '1'
+      else if (f.type === 'num') {
+        if (raw !== '') out[f.key] = Number(raw)
+      } else if (f.type === 'select') {
+        if (raw !== '') out[f.key] = raw
+      } else if (raw !== '') out[f.key] = raw
+    }
+    return out
+  }
+
+  /** 保存结构化表单：POST 顶层补丁（后端按字段合并热生效）。 */
+  const saveForm = async () => {
+    setFormSaving(true)
+    setFormRestart([])
+    try {
+      const r = await api<{ restart_required?: string[] }>('config', {
+        method: 'POST',
+        body: collectForm(),
+      })
+      setFormRestart(r.restart_required || [])
+      onToast(
+        r.restart_required?.length
+          ? `已保存，${r.restart_required.length} 个字段需重启生效`
+          : '配置已保存并热生效',
+        'ok',
+      )
+      await load()
+    } catch (e) {
+      onToast('保存失败：' + errText(e), 'err')
+    } finally {
+      setFormSaving(false)
+    }
+  }
+
+  /** 放弃修改：重新从服务器拉一份（表单与编辑器一起回滚）。 */
+  const discardForm = async () => {
+    setText('')
+    touchedRef.current = false
+    await load()
+  }
+
   if (err && !d) return <View><div className="empty err">读取失败：{err}</div></View>
   if (!d) return <View><div className="empty">加载中…</div></View>
 
@@ -318,6 +458,42 @@ export default function ConfigView({ onToast }: ViewProps) {
   }
 
   const scheduleDirty = scheduleValsIsDirty(scheduleVals, scheduleCfg(cfg))
+
+  /** 结构化表单：渲染一个 .switch 开关。 */
+  const renderFormSwitch = (f: CfgFieldDef) => (
+    <div className="switch" key={f.key}>
+      <span className="lb">{f.label}</span>
+      <input
+        type="checkbox"
+        checked={formVals[f.key] === '1'}
+        onChange={(e) => setFormVals((p) => ({ ...p, [f.key]: e.target.checked ? '1' : '0' }))}
+      />
+    </div>
+  )
+
+  /** 结构化表单：渲染一个 label.fld 字段。 */
+  const renderFormField = (f: CfgFieldDef) => (
+    <label className="fld" key={f.key}>
+      <span className="lb">{f.label}</span>
+      {f.type === 'select' ? (
+        <select value={formVals[f.key] ?? ''} onChange={(e) => setFormVals((p) => ({ ...p, [f.key]: e.target.value }))}>
+          {f.options?.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          type={f.type === 'num' ? 'number' : 'text'}
+          value={formVals[f.key] ?? ''}
+          placeholder={f.placeholder}
+          onChange={(e) => setFormVals((p) => ({ ...p, [f.key]: e.target.value }))}
+        />
+      )}
+      {f.hint ? <span className="hint">{f.hint}</span> : null}
+    </label>
+  )
 
   return (
     <View>
@@ -390,6 +566,16 @@ export default function ConfigView({ onToast }: ViewProps) {
             </div>
           ) : null}
         </div>
+      </Card>
+
+      {/* 服务：与旧版同构（监听 / API 密钥 / 明细条数 / 自动刷新）。 */}
+      <Card title="服务">
+        <div className="grid2">
+          {renderFormField(SERVICE_FIELDS[0])}
+          {renderFormField(SERVICE_FIELDS[1])}
+        </div>
+        {renderFormField(SERVICE_FIELDS[2])}
+        {renderFormField(SERVICE_FIELDS[3])}
       </Card>
 
       <Card
@@ -477,8 +663,93 @@ export default function ConfigView({ onToast }: ViewProps) {
         ) : null}
       </Card>
 
+      {/* 账号池与流量治理：与旧版同构（grid3 字段组 + 快过期优先开关）。 */}
+      <Card title="账号池与流量治理">
+        <div className="grid3">
+          {renderFormField(POOL_FIELDS[0])}
+          {renderFormField(POOL_FIELDS[1])}
+          {renderFormField(POOL_FIELDS[2])}
+        </div>
+        <div className="grid3">
+          {renderFormField(POOL_FIELDS[3])}
+          {renderFormField(POOL_FIELDS[4])}
+          {renderFormField(POOL_FIELDS[5])}
+        </div>
+        <div className="grid3">
+          {renderFormField(POOL_FIELDS[6])}
+          {renderFormField(POOL_FIELDS[7])}
+          {renderFormField(POOL_FIELDS[8])}
+        </div>
+        <div className="grid3">
+          {renderFormField(POOL_FIELDS[9])}
+          {renderFormField(POOL_FIELDS[10])}
+          {renderFormField(POOL_FIELDS[11])}
+        </div>
+        <div className="grid3">
+          {renderFormField(POOL_FIELDS[12])}
+          {renderFormField(POOL_FIELDS[13])}
+          {renderFormField(POOL_FIELDS[14])}
+        </div>
+        <div className="grid3">
+          {renderFormField(POOL_FIELDS[15])}
+          {renderFormField(POOL_FIELDS[16])}
+          {renderFormField(POOL_FIELDS[17])}
+        </div>
+        {renderFormSwitch(POOL_SWITCHES[0])}
+      </Card>
+
+      {/* 上游与高级：与旧版同构（超时 / UA / 模型三表 / 提示词 / 指纹脱敏 / 粘性路由）。 */}
+      <Card title="上游与高级">
+        <div className="grid3">
+          {renderFormField(UPSTREAM_FIELDS[0])}
+          {renderFormField(UPSTREAM_FIELDS[1])}
+          {renderFormField(UPSTREAM_FIELDS[2])}
+        </div>
+        <div className="hr"></div>
+        {renderFormField(UPSTREAM_FIELDS[3])}
+        <div className="hr"></div>
+        <div className="grid2">
+          {renderFormField(UPSTREAM_FIELDS[4])}
+          {renderFormField(UPSTREAM_FIELDS[5])}
+          {renderFormField(UPSTREAM_FIELDS[6])}
+        </div>
+        <div className="hr"></div>
+        <div className="grid2">
+          {renderFormField(UPSTREAM_FIELDS[7])}
+          {renderFormField(UPSTREAM_FIELDS[8])}
+        </div>
+        <div className="hr"></div>
+        {renderFormSwitch(UPSTREAM_SWITCHES[0])}
+        {renderFormField(UPSTREAM_FIELDS[9])}
+        {renderFormSwitch(UPSTREAM_SWITCHES[1])}
+      </Card>
+
+      {/* 日志：与旧版同构（记录调用来源开关）。 */}
+      <Card title="日志">
+        {renderFormSwitch(LOG_SWITCHES[0])}
+        <div className="hint">
+          开启后，「运行日志」页的请求记录会显示每次调用来自哪个 IP、用什么客户端；关闭则归档与面板都不再出现来源信息。改动即时生效，无需重启。
+        </div>
+      </Card>
+
+      {/* 保存栏：与旧版同构（放弃修改 / 保存配置 + 重启提示）。 */}
+      <div className="savebar">
+        <span className="grow" />
+        {formRestart.length ? (
+          <span className="restart-note">
+            需重启生效：<code>{formRestart.join(', ')}</code>
+          </span>
+        ) : null}
+        <button className="btn" disabled={formSaving} onClick={() => void discardForm()}>
+          放弃修改
+        </button>
+        <button className="btn primary" disabled={formSaving} onClick={() => void saveForm()}>
+          {formSaving ? '保存中…' : '保存配置'}
+        </button>
+      </div>
+
       <Card
-        title="配置编辑"
+        title="配置编辑（高级）"
         hint={dirty ? '有未保存的修改' : '编辑后点保存，热生效'}
         actions={
           <>

@@ -38,6 +38,49 @@ const PLAN_LABEL: Record<string, string> = {
   unknown: '未知',
 }
 
+/** 旧版 PK_ACCOUNT_COLORS 同款：按账号稳定取色（排序后分配，刷新不换色）。 */
+const PK_ACCOUNT_COLORS = ['#4f8cff', '#25b08b', '#e8a33d', '#c96bd6', '#e2607a', '#20a4a4', '#8fbf3f', '#d4785c', '#5aa9e6', '#b58b5a']
+const PK_DAY_MS = 86400000
+
+/** 到期分布的一个分段：某账号某包的（FEFO 抵扣后）剩余积分。 */
+type ExpirySeg = {
+  uid: string
+  accountName: string
+  source: string
+  amount: number
+  expiresAt: number | null
+  days: number | null
+}
+
+/**
+ * pkAccountSegments（旧版同口径）：把账号余额按「先到期先扣（FEFO）」分摊到各包，
+ * 得到每个包实际还在的积分段。到期时间为空（长期包）排最后。
+ */
+function pkAccountSegments(a: PkgRow, now: number): ExpirySeg[] {
+  let balance = Math.max(0, Number(a.remain || 0))
+  const out: ExpirySeg[] = []
+  for (const p of a.packages || []) {
+    const remain = Number(p.remain || 0)
+    if (!Number.isFinite(remain) || remain <= 0 || balance <= 0) continue
+    const amount = Math.min(balance, remain)
+    const expiresAt = p.expires_at && p.expires_at > 0 ? p.expires_at : null
+    out.push({
+      uid: String(a.uid || ''),
+      accountName: a.nickname || String(a.uid || '').slice(0, 8) || '未命名账号',
+      source: p.name || '积分',
+      amount,
+      expiresAt,
+      days: expiresAt == null ? null : Math.max(0, Math.ceil((expiresAt - now) / PK_DAY_MS)),
+    })
+    balance -= amount
+  }
+  return out.sort((x, y) => {
+    if (x.expiresAt == null && y.expiresAt != null) return 1
+    if (x.expiresAt != null && y.expiresAt == null) return -1
+    return (x.expiresAt || 0) - (y.expiresAt || 0)
+  })
+}
+
 /** 剩余天数：只用 expires_at（毫秒），避免各时区解析歧义。 */
 function remainDays(ms?: number): number | null {
   if (!ms || ms <= 0) return null
@@ -104,6 +147,58 @@ export default function PackagesView({ onToast }: ViewProps) {
     return m
   }, [pk])
 
+  // 积分到期分布：只在套餐明细已查询后可算（需要逐包数据）。按账号稳定取色。
+  const expiryDist = useMemo(() => {
+    if (!pk) return null
+    const now = Date.now()
+    const usable = pk.filter((a) => !a.error && Number.isFinite(Number(a.remain)))
+    const uids = usable.map((a) => String(a.uid)).sort()
+    const colorMap = new Map<string, string>()
+    uids.forEach((uid, i) => colorMap.set(uid, PK_ACCOUNT_COLORS[i % PK_ACCOUNT_COLORS.length]))
+    const buckets = new Map<number, { days: number; credits: number; segments: ExpirySeg[] }>()
+    let unavailable = 0
+    for (const a of pk) {
+      if (a.error || !Number.isFinite(Number(a.remain))) {
+        unavailable++
+        continue
+      }
+      for (const seg of pkAccountSegments(a, now)) {
+        if (seg.days == null) continue
+        let row = buckets.get(seg.days)
+        if (!row) {
+          row = { days: seg.days, credits: 0, segments: [] }
+          buckets.set(seg.days, row)
+        }
+        row.credits += seg.amount
+        row.segments.push(seg)
+      }
+    }
+    const rows = [...buckets.values()].sort((a, b) => a.days - b.days)
+    for (const row of rows) {
+      row.segments.sort(
+        (a, b) =>
+          (a.expiresAt || Infinity) - (b.expiresAt || Infinity) ||
+          a.accountName.localeCompare(b.accountName) ||
+          a.source.localeCompare(b.source),
+      )
+    }
+    const legend = usable
+      .filter((a) => pkAccountSegments(a, now).some((s) => s.days != null))
+      .map((a) => ({ name: a.nickname || String(a.uid).slice(0, 8), color: colorMap.get(String(a.uid)) || 'var(--accent)' }))
+    return { rows, accountCount: usable.length, unavailable, colorMap, legend }
+  }, [pk])
+
+  // 账号对比卡片（旧版 pkSummary）：每账号一张卡，剩余/总额 + 按包来源的色条。
+  const pkCards = useMemo(() => {
+    if (!pk) return null
+    const maxRemain = Math.max(1, ...pk.map((a) => Number(a.remain || 0)))
+    // 包名 → 稳定色号（跨账号一致，肉眼对齐）。
+    const names: string[] = []
+    for (const a of pk) for (const p of a.packages || []) if (!names.includes(p.name)) names.push(p.name)
+    const colorOf = (n: string) => PK_ACCOUNT_COLORS[names.indexOf(n) % PK_ACCOUNT_COLORS.length]
+    return { list: pk, maxRemain, colorOf }
+  }, [pk])
+
   if (err && !ov) return <View><div className="empty err">读取失败：{err}</div></View>
   if (!ov) return <View><div className="empty">加载中…</div></View>
 
@@ -120,6 +215,150 @@ export default function PackagesView({ onToast }: ViewProps) {
             ))
           : null}
       </Stats>
+
+      {/* 积分到期分布：与旧版同构 —— 每个到期日一行，条内按账号分段着色。 */}
+      <Card
+        title="积分到期分布"
+        hint="按批次到期日聚合，颜色区分账号"
+        actions={
+          <button className="btn sm" disabled={busy} onClick={() => void loadPackages()}>
+            {busy ? '查询中…' : pk ? '刷新' : '查询'}
+          </button>
+        }
+        flush
+      >
+        {!pk ? (
+          <div className="empty">
+            <div className="empty-desc">
+              到期分布需要逐账号查上游套餐（慢且压上游），点「查询」拉取后展示。
+            </div>
+          </div>
+        ) : !expiryDist || expiryDist.rows.length === 0 ? (
+          <div className="empty">
+            <div className="empty-desc">{expiryDist && expiryDist.unavailable ? '部分账号查询失败，且没有可展示的到期批次。' : '没有按日到期的积分批次（长期包或已清空）。'}</div>
+          </div>
+        ) : (
+          <div className="pad">
+            <div className="pk-expiry-hdr">
+              <span>剩余天数</span>
+              <span style={{ textAlign: 'center' }}>各账号该批剩余</span>
+              <b>剩余积分</b>
+            </div>
+            <div className="pk-expiry-chart">
+            {expiryDist.rows.map((row) => {
+              const total = row.credits || 1
+              return (
+                <div className="pk-expiry-row" key={row.days}>
+                  <span>{row.days === 0 ? '已到期' : row.days + ' 天'}</span>
+                  <div className="pk-expiry-track">
+                    {row.segments.map((seg, i) => {
+                      const color = expiryDist.colorMap.get(seg.uid) || 'var(--accent)'
+                      const title =
+                        seg.source +
+                        '\n' + fmtCredit(seg.amount) + ' 积分\n' +
+                        (seg.expiresAt ? '到期时间 ' + fmtLocalDateTime(seg.expiresAt) : '长期包') +
+                        '\n' + seg.accountName
+                      return (
+                        <span
+                          key={i}
+                          className="pk-expiry-seg"
+                          title={title}
+                          style={{
+                            background: color,
+                            opacity: seg.days == null ? 1 : Math.max(0.25, 1 - seg.days / 90),
+                            flex: Math.max(0.008, seg.amount / total) + ' 1 0',
+                          }}
+                        />
+                      )
+                    })}
+                  </div>
+                  <b>{fmtCredit(row.credits)}</b>
+                </div>
+              )
+            })}
+            </div>
+            <div className="pk-legend">
+              {expiryDist.legend.map((l, i) => (
+                <span key={i}>
+                  <i style={{ background: l.color }} />
+                  {l.name}
+                </span>
+              ))}
+              {expiryDist.unavailable ? <span>· {expiryDist.unavailable} 个未获取余额</span> : null}
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* 账号对比：与旧版同构 —— 每账号一张卡（剩余/总额 + 按包来源色条）。 */}
+      <Card title="账号对比" hint={pk ? `${(pk || []).length} 个账号` : '查询套餐明细后展示'} flush>
+        {!pkCards || pkCards.list.length === 0 ? (
+          <div className="empty">
+            <div className="empty-desc">{pk ? '没有账号' : '点「积分到期分布」的「查询」后展示每账号对比。'}</div>
+          </div>
+        ) : (
+          <div className="pad">
+            <div className="pk-grid">
+              {pkCards.list.map((a) => {
+                if (a.error) {
+                  return (
+                    <div className="pk-card" key={a.uid}>
+                      <div className="who">
+                        <span className="nm">{a.nickname || String(a.uid).slice(0, 8)}</span>
+                        <span className="realm">{a.realm || ''}</span>
+                      </div>
+                      <div className="row-reason">查询失败：{a.error}</div>
+                    </div>
+                  )
+                }
+                // 按包来源聚合（同名包合并），色条宽度按 size 占比。
+                const bySrc = new Map<string, { name: string; size: number; n: number }>()
+                for (const p of a.packages || []) {
+                  const cur = bySrc.get(p.name) || { name: p.name, size: 0, n: 0 }
+                  cur.size += Number(p.size || 0)
+                  cur.n += 1
+                  bySrc.set(p.name, cur)
+                }
+                const srcs = [...bySrc.values()].sort((x, y) => y.size - x.size)
+                const total = Math.max(1, Number(a.size || 0))
+                return (
+                  <div className="pk-card" key={a.uid}>
+                    <div className="who">
+                      <span className="nm">{a.nickname || String(a.uid).slice(0, 8)}</span>
+                      <span className="realm">{a.realm || ''}</span>
+                    </div>
+                    <div className="big">{fmtCredit(a.remain)}</div>
+                    <div className="sub">
+                      共 {fmtCredit(a.size)} · {(a.packages || []).length} 个包 · 占最高{' '}
+                      {((Number(a.remain || 0) / pkCards.maxRemain) * 100).toFixed(0)}%
+                    </div>
+                    <div className="mixbar">
+                      {srcs.map((s) => (
+                        <i
+                          key={s.name}
+                          style={{
+                            width: ((s.size / total) * 100).toFixed(2) + '%',
+                            background: pkCards.colorOf(s.name),
+                          }}
+                          title={s.name + ' ' + fmtCredit(s.size)}
+                        />
+                      ))}
+                    </div>
+                    <div className="pk-legend">
+                      {srcs.map((s) => (
+                        <span key={s.name}>
+                          <i style={{ background: pkCards.colorOf(s.name) }} />
+                          {s.name.replace(/^CodeBuddy/, '')} ×{s.n} · {fmtCredit(s.size)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </Card>
 
       <Card title="积分余额" hint={`${accts.length} 个账号`} flush>
         {accts.length === 0 ? (

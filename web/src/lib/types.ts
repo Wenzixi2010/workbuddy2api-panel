@@ -25,9 +25,15 @@ export type ExpiryBucket = {
 }
 
 export type TokenUsage = {
-  input?: number
-  output?: number
-  total?: number
+  request_count?: number
+  usage_count?: number
+  prompt_tokens?: number
+  completion_tokens?: number
+  total_tokens?: number
+  last_latency_ms?: number
+  last_tokens_per_second?: number
+  last_used_at?: string
+  last_model?: string
 }
 
 export type AccountStatus = {
