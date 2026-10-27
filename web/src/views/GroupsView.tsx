@@ -226,6 +226,35 @@ function ModelMultiSelect({
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
   const boxRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  // 下拉面板用 position:fixed 定位（弹出时按 box 的视口坐标算）：
+  // modal 是 overflow:auto 的裁剪上下文，absolute 面板会被弹窗边缘裁掉、
+  // 底部模型滚不到。fixed 面板挂在 body 层级语义上，完全脱离裁剪。
+  const [pos, setPos] = useState<{ left: number; top: number; width: number; up: boolean } | null>(null)
+
+  // 打开时计算面板位置：默认朝下展开；下方视口空间不足（<180px）改朝上。
+  const place = useCallback(() => {
+    const box = boxRef.current
+    if (!box) return
+    const r = box.getBoundingClientRect()
+    const up = window.innerHeight - r.bottom < 180 && r.top > 260
+    setPos({ left: r.left, top: up ? r.top - 8 : r.bottom + 4, width: r.width, up })
+  }, [])
+
+  useEffect(() => {
+    if (!open) {
+      setPos(null)
+      return
+    }
+    place()
+    // 滚动/窗口变化时重算（fixed 定位不随文档流滚动）。
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+    return () => {
+      window.removeEventListener('scroll', place, true)
+      window.removeEventListener('resize', place)
+    }
+  }, [open, place])
 
   // 已选里的 id 若不在当前目录（如已下架模型），也保留展示，不丢。
   const filtered = useMemo(() => {
@@ -288,8 +317,12 @@ function ModelMultiSelect({
         <span className="msel-arrow">▾</span>
       </div>
 
-      {open ? (
-        <div className="msel-panel">
+      {open && pos ? (
+        <div
+          className={'msel-panel' + (pos.up ? ' up' : '')}
+          ref={panelRef}
+          style={{ position: 'fixed', left: pos.left, width: pos.width, top: pos.up ? undefined : pos.top, bottom: pos.up ? window.innerHeight - pos.top : undefined }}
+        >
           <input
             className="msel-q"
             value={q}

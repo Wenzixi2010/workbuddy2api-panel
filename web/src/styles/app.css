@@ -372,11 +372,9 @@
 .msel-x:hover { color: var(--danger); }
 .msel-arrow { color: var(--ink-3); font-size: 11px; margin-left: auto; }
 .msel-panel {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  right: 0;
-  z-index: 30;
+  /* 定位由 JS 以 position:fixed 写入（脱离 modal 的 overflow 裁剪上下文，
+     否则面板被弹窗边缘裁掉、列表底部模型滚不到）。 */
+  z-index: 80;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -392,7 +390,11 @@
   background: var(--surface);
   outline: none;
 }
-.msel-list { max-height: 240px; overflow-y: auto; }
+.msel-list {
+  max-height: min(300px, 32vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .msel-item {
   display: flex;
   align-items: center;
