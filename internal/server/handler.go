@@ -105,6 +105,9 @@ type Config struct {
 	// 是否真正生效还要看 livecfg.ClientKeysEnabled（config client_keys.enabled）：
 	// 两者同时满足才在认证路径上起作用——面板关掉开关就等于收回全部客户 Key。
 	ClientKeys *gatewaykey.Store
+	// Groups 客户 Key 分组存储（可选；nil = 未启用分组功能）。分组白名单约束在
+	// chat 请求路径上生效：归属分组的 key 只能调白名单内的模型。
+	Groups *gatewaykey.GroupStore
 }
 
 // loadLive 返回当前运行期快照；Live 为 nil 时用静态字段合成。
@@ -836,6 +839,12 @@ func (h *Handler) chatCompletions(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
+	}
+	// 分组模型白名单（clientkey.go）：归属分组的 Key 只能调分组允许的模型。
+	// 在别名解析之后检查（用最终模型名），在选号之前拦截（不浪费选号/预算判定）。
+	if blocked, why := h.clientKeyGroupAllows(r, realm, bareModel); blocked {
+		writeOpenAIError(w, http.StatusForbidden, "client_key_model_denied", why)
+		return
 	}
 	// 模型降级（pool.model_fallback）：curModel 是**本轮实际使用**的模型，初值 = 客户端
 	// 请求的 bareModel；某账号在本轮模型上被 6004 模型级限流、且配置了等价模型时，

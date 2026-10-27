@@ -8,6 +8,7 @@ import BalanceHistoryView from '../views/BalanceHistoryView'
 import TasksCenterView from '../views/TasksCenterView'
 import ModelsView from '../views/ModelsView'
 import ClientKeysView from '../views/ClientKeysView'
+import GroupsView from '../views/GroupsView'
 import ConfigView from '../views/ConfigView'
 import EventsView from '../views/EventsView'
 import LogsView from '../views/LogsView'
@@ -20,6 +21,7 @@ export type ViewId =
   | 'taskscenter'
   | 'models'
   | 'keys'
+  | 'groups'
   | 'config'
   | 'events'
   | 'logs'
@@ -81,6 +83,12 @@ export const VIEWS: ViewDef[] = [
     title: 'API Keys',
     icon: '<circle cx="5.2" cy="10.8" r="2.6"/><path d="M7.1 8.9l5.4-5.4M10.2 5.8l1.6 1.6M11.8 4.2l1.6 1.6"/>',
     Component: ClientKeysView,
+  },
+  {
+    id: 'groups',
+    title: '分组',
+    icon: '<rect x="2" y="3" width="5.2" height="5.2" rx="1"/><rect x="8.8" y="3" width="5.2" height="5.2" rx="1"/><rect x="2" y="10.2" width="5.2" height="2.8" rx="1"/><rect x="8.8" y="10.2" width="5.2" height="2.8" rx="1"/>',
+    Component: GroupsView,
   },
   {
     id: 'config',

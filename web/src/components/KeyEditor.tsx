@@ -1,21 +1,23 @@
 import { useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import { errText } from '../lib/format'
-import type { BindableAccount, ClientKey } from '../lib/types'
+import type { BindableAccount, ClientKey, Group } from '../lib/types'
 
 type Props = {
   keyItem: ClientKey | null // null = 新建
   accounts: BindableAccount[]
+  groups: Group[]
   onClose: () => void
   onSaved: () => void
   onToast: (msg: string, kind?: 'ok' | 'err' | '') => void
 }
 
 /** 客户 Key 的新建/编辑弹窗；新建时带明文一次性展示。 */
-export default function KeyEditor({ keyItem, accounts, onClose, onSaved, onToast }: Props) {
+export default function KeyEditor({ keyItem, accounts, groups, onClose, onSaved, onToast }: Props) {
   const isNew = keyItem === null
   const [name, setName] = useState(keyItem?.name || '')
   const [remark, setRemark] = useState(keyItem?.remark || '')
+  const [group, setGroup] = useState(keyItem?.group || '')
   const [period, setPeriod] = useState(keyItem?.limits.period || '')
   const [credits, setCredits] = useState(
     keyItem?.limits.credits ? String(keyItem.limits.credits) : ''
@@ -56,6 +58,7 @@ export default function KeyEditor({ keyItem, accounts, onClose, onSaved, onToast
     const body = {
       name: name.trim(),
       remark: remark.trim(),
+      group: group || '',
       binds,
       limits: period ? { period, credits: Number(credits) } : { period: '', credits: 0 },
       ...(customKey.trim() ? { key: customKey.trim() } : {}),
@@ -101,6 +104,18 @@ export default function KeyEditor({ keyItem, accounts, onClose, onSaved, onToast
             <input value={remark} onChange={(e) => setRemark(e.target.value)} placeholder="可选" />
           </div>
           <div className="fld">
+            <span>分组（可选）</span>
+            <select value={group} onChange={(e) => setGroup(e.target.value)}>
+              <option value="">不分组</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                  {g.models.length ? `（${g.models.length} 个模型）` : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="fld">
             <span>额度周期</span>
             <select value={period} onChange={(e) => setPeriod(e.target.value)}>
               <option value="">不限额</option>
@@ -125,7 +140,7 @@ export default function KeyEditor({ keyItem, accounts, onClose, onSaved, onToast
         <div className="fld" style={{ marginBottom: 10 }}>
           <span>
             自定义 Key（可选）
-            <span className="dim"> 留空自动生成 gw- 前缀随机 Key；填了则用它（8–128 位，无空格）</span>
+            <span className="dim"> 留空自动生成 sk- 前缀随机 Key；填了则用它（8–128 位，无空格）</span>
           </span>
           <input
             value={customKey}

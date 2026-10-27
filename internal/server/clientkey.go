@@ -13,6 +13,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -140,7 +141,28 @@ func (h *Handler) clientKeyExhausted(r *http.Request) (bool, string) {
 	return true, msg
 }
 
-// clientKeyFilter 把当前请求的账号范围翻译成选号过滤器。
+// clientKeyGroupAllows 判定「当前请求的客户 Key 是否被允许调用某模型」。
+// 返回 (是否拦截, 提示)。仅当 Key 归属分组且分组设了非空白名单时才有约束力；
+// 主密钥 / 未分组 / 白名单为空 / 分组未设白名单 一律放行（返回 false）。
+// 匹配口径：白名单条目既可是裸名（跨 realm 匹配）也可是 realm:name 完整名。
+func (h *Handler) clientKeyGroupAllows(r *http.Request, realm, bareModel string) (bool, string) {
+	id := identityFrom(r)
+	if id == nil || id.entry == nil {
+		return false, ""
+	}
+	models := id.entry.GroupModels()
+	if len(models) == 0 {
+		return false, "" // 未分组或白名单为空：不限制
+	}
+	full := realm + ":" + bareModel
+	for _, m := range models {
+		if m == bareModel || m == full {
+			return false, "" // 命中白名单
+		}
+	}
+	group := id.entry.Group()
+	return true, fmt.Sprintf("该 Key 归属分组「%s」，模型 %s 不在其允许名单内", group, full)
+}
 //
 // 三种情形：
 //   - 主密钥 / 未启用客户 Key（filter 恒零值）：池行为与旧版完全一致；

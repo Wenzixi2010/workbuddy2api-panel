@@ -45,10 +45,9 @@ import (
 	"github.com/misakano7545/workbuddy2api-panel/internal/safefile"
 )
 
-// KeyPrefix 客户 Key 的明文前缀。刻意与上游账号凭证（ck_/pt_）和主密钥（sk-）
-// 都不同：一眼看出「这是网关签发的下游 Key」，贴错地方时不至于被当成上游凭证
-// 塞进 auths/ 目录。
-const KeyPrefix = "gw-"
+// KeyPrefix 客户 Key 的明文前缀。与主密钥一致用 sk-，一眼看出「这是 API Key」；
+// 与上游账号凭证（ck_/pt_）仍不同，贴错地方时不至于被当成上游凭证塞进 auths/。
+const KeyPrefix = "sk-"
 
 // 名称/备注长度上限（按 rune 计）；备注可为空。
 const (
@@ -88,6 +87,9 @@ type Record struct {
 	// 明文只用于管理面展示，不参与任何运行期比对。旧数据没有该字段 = 无法回显，
 	// 轮换一次后即有存档。
 	KeyPlain string `json:"key_plain,omitempty"`
+	// Group 归属的分组 ID（可选）。非空时本 Key 受该分组的模型白名单约束：
+	// 分组设了白名单后，本 Key 只能调用白名单内的模型。分组由 GroupStore 管理。
+	Group string `json:"group,omitempty"`
 	// Binds 绑定的上游账号 uid 集合。非空 = 独占：本 Key 只用这些号，这些号也只服务
 	// 绑定了它们的 Key。
 	Binds []string `json:"binds,omitempty"`
@@ -112,6 +114,7 @@ type View struct {
 	Remark   string   `json:"remark"`
 	KeyHint  string   `json:"key_hint"`
 	Key      string   `json:"key,omitempty"` // 明文（有存档时回显；旧数据无存档为空）
+	Group    string   `json:"group,omitempty"` // 归属分组 ID
 	Binds    []string `json:"binds"`
 	BindsAll bool     `json:"binds_all"`
 	Limits   Limits   `json:"limits"`
@@ -154,7 +157,22 @@ type Store struct {
 	claims map[string]struct{}
 	usage  map[string]*usageState
 
+	// groups 分组存储引用（可选）。认证时用它把 key 的分组白名单塞进 Entry。
+	// 由装配方 SetGroups 注入；nil 时分组功能退化为「key 可标分组但无白名单约束」。
+	groups *GroupStore
+
 	warned bool // 「额度已用尽」日志去重（恢复后允许再报一次）
+}
+
+// SetGroups 注入分组存储引用（装配方在启动时调用一次）。返回 s 便于链式。
+func (s *Store) SetGroups(gs *GroupStore) *Store {
+	if s == nil {
+		return s
+	}
+	s.mu.Lock()
+	s.groups = gs
+	s.mu.Unlock()
+	return s
 }
 
 // Open 载入 Store。path 不存在 = 空集合（不是错误）；文件损坏时 safefile.Read 回退
@@ -243,6 +261,11 @@ func (s *Store) Authenticate(plain string) (*Entry, error) {
 	if s == nil || strings.TrimSpace(plain) == "" {
 		return nil, ErrInvalid
 	}
+	// 旧前缀 gw- 的 Key 一律不认（升级后需轮换到 sk-）：直接按明文前缀拦，
+	// 不必查哈希——它们即便落盘了也应按「已废止」处理。
+	if strings.HasPrefix(plain, "gw-") {
+		return nil, ErrInvalid
+	}
 	sum := sha256.Sum256([]byte(plain))
 	hexSum := hex.EncodeToString(sum[:])
 
@@ -270,8 +293,18 @@ func (s *Store) Authenticate(plain string) (*Entry, error) {
 		name:   r.Name,
 		binds:  make([]string, len(r.Binds)),
 		limits: r.Limits,
+		group:  r.Group,
 	}
 	copy(e.binds, r.Binds)
+
+	// 分组白名单：有归属分组时从 GroupStore 取该分组的模型白名单塞进快照。
+	if r.Group != "" {
+		if gs := s.groups; gs != nil {
+			if models := gs.ModelsForGroup(r.Group); models != nil {
+				e.groupModels = models
+			}
+		}
+	}
 
 	s.mu.RLock()
 	if st := s.usage[r.ID]; st != nil {
@@ -298,6 +331,8 @@ type Entry struct {
 	name     string
 	binds    []string
 	limits   Limits
+	group    string
+	groupModels []string // 归属分组的模型白名单（nil = 分组未设白名单，全放行）
 	used     float64
 	day      string
 	requests int64
@@ -341,6 +376,26 @@ func (e *Entry) Limits() Limits {
 		return Limits{}
 	}
 	return e.limits
+}
+
+// Group 归属分组 ID（空 = 未分组）。
+func (e *Entry) Group() string {
+	if e == nil {
+		return ""
+	}
+	return e.group
+}
+
+// GroupModels 归属分组的模型白名单（副本）。返回 nil = 分组未设白名单（全放行）；
+// 返回空切片 = 分组设了白名单但为空（按空放行，等于拦全部——调用方自行解释）。
+// 语义约定：nil 与空切片都表示「不拦截」，具体放行判定交给 server 层。
+func (e *Entry) GroupModels() []string {
+	if e == nil || len(e.groupModels) == 0 {
+		return nil
+	}
+	out := make([]string, len(e.groupModels))
+	copy(out, e.groupModels)
+	return out
 }
 
 // Used 当前周期已用积分（快照时刻）。
@@ -484,13 +539,15 @@ type Input struct {
 	BindsAll *bool     `json:"binds_all"`
 	Limits   *Limits   `json:"limits"`
 	Disabled *bool     `json:"disabled"`
+	// Group 归属分组 ID（可选）。空串 = 清除分组。
+	Group *string `json:"group,omitempty"`
 	// Key 自定义明文（可选）：Create/RotateTo 时若非空则用它而非随机生成。
 	// 留空 = 沿用随机 32 字节；给值则做 validateKey 校验后落 sha256。
 	Key *string `json:"key,omitempty"`
 }
 
 // validateKey 校验自定义明文：非空、不含空白、长度在 [8, 128] 字节之间。
-// 不强求 gw- 前缀——有些下游要贴自己的固定 Key 值；但留出提示由调用方决定。
+// 不强求 sk- 前缀——有些下游要贴自己的固定 Key 值；但留出提示由调用方决定。
 func validateKey(plain string) error {
 	p := strings.TrimSpace(plain)
 	if p == "" {
@@ -507,7 +564,7 @@ func validateKey(plain string) error {
 
 // Create 新建客户 Key，返回明文（**仅此一次**）与视图。
 //
-// 默认 32 字节 crypto/rand（256 bit）+ base64url 无填充，前缀 gw-：暴力枚举不可行，
+// 默认 32 字节 crypto/rand（256 bit）+ base64url 无填充，前缀 sk-：暴力枚举不可行，
 // 长度与主流网关 Key 相当。in.Key 非空时改用调用方提供的自定义明文（validateKey 校验）。
 func (s *Store) Create(in Input) (string, View, error) {
 	plain := ""
@@ -547,6 +604,10 @@ func (s *Store) Create(in Input) (string, View, error) {
 	}
 	dis := in.Disabled != nil && *in.Disabled
 	all := (in.BindsAll != nil && *in.BindsAll) && len(binds) == 0
+	group := ""
+	if in.Group != nil {
+		group = strings.TrimSpace(*in.Group)
+	}
 	now := time.Now()
 
 	s.mu.Lock()
@@ -564,6 +625,7 @@ func (s *Store) Create(in Input) (string, View, error) {
 		KeyHash:   hashKey(plain),
 		KeyHint:   keyHint(plain),
 		KeyPlain:  plain,
+		Group:     group,
 		Binds:     binds,
 		BindsAll:  all,
 		Limits:    limits,
@@ -632,6 +694,9 @@ func (s *Store) Update(id string, in Input) (View, error) {
 	}
 	if in.Disabled != nil {
 		r.Disabled = *in.Disabled
+	}
+	if in.Group != nil {
+		r.Group = strings.TrimSpace(*in.Group)
 	}
 	r.UpdatedAt = time.Now()
 	prev := *r
@@ -772,6 +837,7 @@ func (s *Store) viewLocked(r *Record) View {
 		Remark:         r.Remark,
 		KeyHint:        r.KeyHint,
 		Key:            r.KeyPlain,
+		Group:          r.Group,
 		Binds:          append([]string{}, r.Binds...),
 		BindsAll:       r.BindsAll,
 		Limits:         r.Limits,

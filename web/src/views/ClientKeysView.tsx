@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 import { ago, errText, fmtCredit } from '../lib/format'
-import type { BindableAccount, ClientKey, ClientKeysResp } from '../lib/types'
+import type { BindableAccount, ClientKey, ClientKeysResp, Group } from '../lib/types'
 import { Card, Stat, Stats, View } from '../components/Layout'
 import type { ViewProps } from './types'
 import KeyEditor from '../components/KeyEditor'
@@ -35,6 +35,7 @@ export default function ClientKeysView({ onToast }: ViewProps) {
   const [bindable, setBindable] = useState<BindableAccount[]>([])
   const [editing, setEditing] = useState<ClientKey | null | 'new'>(null)
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
+  const [groups, setGroups] = useState<Group[]>([])
 
   const load = useCallback(async () => {
     try {
@@ -51,11 +52,19 @@ export default function ClientKeysView({ onToast }: ViewProps) {
   }, [load])
 
   useEffect(() => {
+    api<{ groups?: Group[] }>('groups')
+      .then((d) => setGroups(d.groups || []))
+      .catch(() => setGroups([]))
+  }, [])
+
+  useEffect(() => {
     if (!data?.enabled) return
     api<{ accounts?: BindableAccount[] }>('client_keys/bindable')
       .then((d) => setBindable(d.accounts || []))
       .catch(() => setBindable([]))
   }, [data?.enabled])
+
+  const groupName = (id?: string) => (id ? groups.find((g) => g.id === id)?.name || id : '')
 
   const act = async (id: string, path: string, okMsg: string) => {
     try {
@@ -97,6 +106,12 @@ export default function ClientKeysView({ onToast }: ViewProps) {
   const keys = data.keys || []
   const enabled = keys.filter((k) => !k.disabled && !k.exhausted).length
   const totalUsed = keys.reduce((s, k) => s + (k.used || 0), 0)
+  // 网关与面板同 host：Base URL 直接用当前访问地址（去掉 /panel/ 路径）。
+  const baseUrl = window.location.origin
+  const sampleReq = `curl ${baseUrl}/v1/chat/completions \\
+  -H "Authorization: Bearer <你的Key>" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"<模型>","messages":[{"role":"user","content":"你好"}]}'`
 
   return (
     <View>
@@ -106,6 +121,23 @@ export default function ClientKeysView({ onToast }: ViewProps) {
         <Stat label="已停用/超限" value={keys.length - enabled} tone={keys.length - enabled ? 'warn' : undefined} />
         <Stat label="累计消耗" value={fmtCredit(totalUsed)} />
       </Stats>
+
+      <Card title="连接信息" hint="下游客户端接入时使用（密钥请在 Key 列表里查看明文后自行粘贴）">
+        <div className="ck-conn">
+          <div className="ck-conn-row">
+            <span className="ck-conn-label">Base URL</span>
+            <code className="ck-conn-val">{baseUrl}</code>
+          </div>
+          <div className="ck-conn-row">
+            <span className="ck-conn-label">接口</span>
+            <code className="ck-conn-val">POST {baseUrl}/v1/chat/completions</code>
+          </div>
+          <div className="ck-conn-row">
+            <span className="ck-conn-label">示例请求</span>
+          </div>
+          <pre className="ck-conn-pre">{sampleReq}</pre>
+        </div>
+      </Card>
 
       {keys.length === 0 ? (
         <Card title="Key 列表">
@@ -140,6 +172,7 @@ export default function ClientKeysView({ onToast }: ViewProps) {
             <thead>
               <tr>
                 <th>名称</th>
+                <th>分组</th>
                 <th>Key</th>
                 <th>绑定账号</th>
                 <th>额度</th>
@@ -155,6 +188,15 @@ export default function ClientKeysView({ onToast }: ViewProps) {
                   <td>
                     <div className="ck-name">{k.name}</div>
                     {k.remark ? <div className="ck-remark">{k.remark}</div> : null}
+                  </td>
+                  <td>
+                    {k.group ? (
+                      <span className="tag warn" title={`分组「${groupName(k.group)}」的模型白名单对本 Key 生效`}>
+                        {groupName(k.group)}
+                      </span>
+                    ) : (
+                      <span className="dim">未分组</span>
+                    )}
                   </td>
                   <td className="mono">
                     {revealed[k.id] && k.key ? (
@@ -256,6 +298,7 @@ export default function ClientKeysView({ onToast }: ViewProps) {
         <KeyEditor
           keyItem={editing === 'new' ? null : editing}
           accounts={bindable}
+          groups={groups}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null)

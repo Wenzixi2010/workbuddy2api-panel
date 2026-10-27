@@ -109,6 +109,7 @@ export type ClientKey = {
   remark: string
   key_hint: string
   key?: string
+  group?: string
   binds: string[]
   binds_all: boolean
   limits: { period: string; credits: number }
@@ -127,6 +128,21 @@ export type ClientKey = {
 export type ClientKeysResp = {
   enabled: boolean
   keys?: ClientKey[]
+  path?: string
+  error?: string
+}
+
+export type Group = {
+  id: string
+  name: string
+  models: string[]
+  created_at: string
+  updated_at: string
+}
+
+export type GroupsResp = {
+  enabled: boolean
+  groups?: Group[]
   path?: string
   error?: string
 }

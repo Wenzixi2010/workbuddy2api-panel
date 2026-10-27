@@ -422,6 +422,20 @@ func main() {
 		log.Printf("[gatewaykey] 客户 API Key 已配置但关闭（client_keys.enabled=false）：%s 中的 %d 把 Key 暂时无效", clientKeyPath, clientKeys.Len())
 	}
 
+	// 客户 Key 分组存储：与 key 同目录的 gateway_groups.json。载入失败不致命，分组
+	// 功能降级为「不限制模型」（key 仍可标分组，只是无白名单约束）。
+	groupPath := stateSibling(cfg.StateFile, "gateway_groups.json")
+	groups, gErr := gatewaykey.OpenGroups(groupPath)
+	if gErr != nil {
+		log.Printf("ERROR: 客户 Key 分组存储载入失败: %v —— 本次运行不启用分组模型白名单，修好 %s 后重启", gErr, groupPath)
+		groups = nil
+	} else {
+		log.Printf("[gatewaykey] 客户 Key 分组已加载：%s（%d 个分组）", groupPath, groups.Len())
+	}
+	if clientKeys != nil && groups != nil {
+		clientKeys.SetGroups(groups)
+	}
+
 	var pn *panel.Panel
 	pn = panel.New(panel.Config{
 		Pool:       p,
@@ -471,6 +485,8 @@ func main() {
 		CreditHistory: creditHist,
 		// 客户 API Key 存储（nil = 载入失败或未配置：面板显示说明而不是空表格）。
 		ClientKeys: clientKeys,
+		// 客户 Key 分组存储（nil = 载入失败：分组页签显示说明）。
+		Groups: groups,
 		// 面板据开关决定是否展示 Key 管理入口（与网关认证读同一份热配置）。
 		ClientKeysEnabled: func() bool { return live.Load().ClientKeysEnabled },
 		// 面板登录：凭据同样走热配置，改完密码下一个登录请求即生效。
@@ -543,6 +559,8 @@ func main() {
 		// 客户 API Key：认证、绑定账户范围、每 Key 积分额度（clientkey.go）。
 		// nil = 载入失败时只剩主密钥可用（上面已打 ERROR）。
 		ClientKeys: clientKeys,
+		// 客户 Key 分组：分组→模型白名单，在 chat 路径拦截越权模型。
+		Groups: groups,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

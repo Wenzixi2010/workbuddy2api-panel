@@ -97,6 +97,9 @@ type Config struct {
 	// ClientKeysEnabled 功能开关（config client_keys.enabled 的热快照）。nil = 以
 	// ClientKeys 是否非 nil 为准（测试/裸用路径）。
 	ClientKeysEnabled func() bool
+	// Groups 客户 Key 分组存储（nil = 未启用分组功能）。面板管理分组与模型白名单，
+	// 网关侧据此拦截「分组 Key 调用了白名单外模型」。
+	Groups *gatewaykey.GroupStore
 
 	// PanelAuth 返回面板登录账号密码（config panel_auth 的热快照）。nil = 回落到
 	// APIKey + 无密码，即「不启用账号登录」，与旧行为一致（测试/裸用路径）。
@@ -316,6 +319,11 @@ func (p *Panel) routes() {
 	p.mux.HandleFunc("POST /panel/api/client_keys/{id}/delete", p.withAuth(p.clientKeyDelete))
 	p.mux.HandleFunc("POST /panel/api/client_keys/{id}/rotate", p.withAuth(p.clientKeyRotate))
 	p.mux.HandleFunc("POST /panel/api/client_keys/{id}/reset_usage", p.withAuth(p.clientKeyResetUsage))
+	// 客户 Key 分组：分组管理 + 分组→模型白名单。
+	p.mux.HandleFunc("GET /panel/api/groups", p.withAuth(p.groups))
+	p.mux.HandleFunc("POST /panel/api/groups", p.withAuth(p.groupCreate))
+	p.mux.HandleFunc("POST /panel/api/groups/{id}", p.withAuth(p.groupUpdate))
+	p.mux.HandleFunc("POST /panel/api/groups/{id}/delete", p.withAuth(p.groupDelete))
 	p.mux.HandleFunc("GET /panel/api/config", p.withAuth(p.getConfig))
 	p.mux.HandleFunc("POST /panel/api/config", p.withAuth(p.saveConfig))
 	p.mux.HandleFunc("GET /panel/api/update", p.withAuth(p.updateStatus))
